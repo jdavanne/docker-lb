@@ -1,18 +1,30 @@
 
-version: "3"
 services:
   lb:
-    build: ./
+    build: 
+      platforms: 
+        - ${PLATFORM}
+      context: ./
     image: docker-lb
     ports:
-      - "8080:8080"
-    command: ["/bin/lb", "--verbose",  "8080:service1:8081"]
+      - "10123:10123"
+    command: ["/bin/lb", "10123:service1:8081" , "10124:service2:8081,http", "10125:service2:8081,https"]
 
   service1:
+    scale: 5
     image: alpine
-    command: ["/bin/sh", "-c", "while true; do echo 'HTTP/1.1 200 OK\n\nHello, world from '$$HOSTNAME'!' | nc -l -p 8081; done"]
+    command: ["/bin/sh", "-c", "while true; do echo 'waiting...'; echo 'HTTP/1.1 200 OK\n\nHello, world from service1 '$$HOSTNAME'!' | nc -l -p 8081 -w 30; done"]
 
-  client:
+  service2:
+    scale: 5
     image: alpine
-    command: ["/bin/sh", "-c", "while true; do echo -e 'GET / HTTP/1.1\n' | nc lb 8080; sleep 2; done"]
+    command: ["/bin/sh", "-c", "while true; do echo 'waiting...'; echo 'HTTP/1.1 200 OK\n\nHello, world from service2 '$$HOSTNAME'!' | nc -l -p 8081 -w 30; done"]
+
+  sut:
+    build: 
+      context: ./tests/sut
+    depends_on:
+      - lb
+      - service1
+      - service2
   

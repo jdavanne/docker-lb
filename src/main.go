@@ -1,12 +1,11 @@
 package main
 
 import (
+	"crypto/tls"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"log/slog"
-	"net"
 	"os"
 	"runtime"
 	"strings"
@@ -14,10 +13,23 @@ import (
 	"time"
 )
 
+// Version of the software
+var Version string
+
+// Build number of the software
+var Build string = "dev"
+
+// Date of the build software
+var Date string
+
 var (
 	probePeriod = flag.Duration("probe-period", 2*time.Second, "Probe period")
 	verbose     = flag.Bool("verbose", false, "Verbose mode")
 )
+
+var ops atomic.Uint64
+var opened atomic.Int64
+var cumSent, cumReceived atomic.Int64
 
 func PrintMemUsage() {
 	var m runtime.MemStats
@@ -29,104 +41,23 @@ func PrintMemUsage() {
 	fmt.Printf("\tSys=%v KiB", m.Sys/1024)
 	fmt.Printf("\tNumGC=%v\n", m.NumGC)
 }
-
-func dnsProbe(host string) {
-	slog.Info("Resolving", "host", host)
-	m := make(map[string]int)
-	round := 0
-	for {
-		time.Sleep(*probePeriod)
-		round++
-
-		if *verbose {
-			PrintMemUsage()
-			slog.Info("Probing...", "host", host)
-		}
-
-		ips, err := net.LookupIP(host)
-		if err != nil {
-			slog.Error("Lookup failed", "host", host, "err", err)
-			continue
-		}
-
-		for _, ip := range ips {
-			if m[ip.String()] == 0 {
-				slog.Info("New", "host", host, "ip", ip.String())
-			}
-			m[ip.String()] = round
-		}
-
-		for k, v := range m {
-			if v != round {
-				slog.Info("Lost", "host", host, "ip", k)
-				delete(m, k)
-			}
+func checkOption(options []string, name string) (string, bool) {
+	for _, option := range options {
+		if strings.HasPrefix(option, name+"=") {
+			return option[len(name):], true
+		} else if option == name {
+			return "", true
 		}
 	}
+	return "", false
 }
 
-func forward(c net.Conn, addr string, port string) {
-	defer c.Close()
-
-	// Connect to the remote server
-	remote, err := net.Dial("tcp", addr)
-	if err != nil {
-		slog.Error("Dial failed", "addr", addr, "err", err)
-		return
-	}
-	defer remote.Close()
-
-	slog.Info("Forwarding", "port", port, "remote", remote.RemoteAddr())
-
-	var closed atomic.Bool
-	// Run in parallel to prevent blocking
-	go func() {
-		defer c.Close()
-		// Copy the data from the client to the remote server
-		_, err := io.Copy(remote, c)
-		if err != nil && closed.Load() == false {
-			slog.Error("Connection error", "remote", remote.RemoteAddr(), "addr", addr, "err", err)
-		}
-		closed.Store(true)
-	}()
-
-	// Copy the data from the remote server to the client
-	_, err = io.Copy(c, remote)
-	if err != nil && closed.Load() == false {
-		slog.Error("Connection error", "remote", remote.RemoteAddr(), "addr", addr, "err", err)
-	}
-	closed.Store(true)
-}
-
-func listenAndForward(port string, addr string) {
-	slog.Info("Forwarding", "port", port, "addr", addr)
-
-	l, err := net.Listen("tcp", ":"+port)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	go func() {
-		defer l.Close()
-		for {
-			// Wait for a connection.
-			conn, err := l.Accept()
-			if err != nil {
-				log.Fatal(err)
-			}
-			// Handle the connection in a new goroutine.
-			// The loop then returns to accepting, so that
-			// multiple connections may be served concurrently.
-			go forward(conn, addr, port)
-		}
-	}()
-}
-
-func smain(args []string) {
-	hosts := make(map[string]bool)
+func smain(args []string, clientProxyProtocol, serverProxyProtocol bool, cert, key string) {
+	hosts := make(map[string]*DnsProbe)
 	for i, arg := range args {
 		// fmt.Println(arg)
-		mappings := strings.Split(arg, ":")
+		options := strings.Split(arg, ",")
+		mappings := strings.Split(options[0], ":")
 		var porti, host, port string
 		if len(mappings) == 3 {
 			porti = mappings[0]
@@ -140,32 +71,56 @@ func smain(args []string) {
 			log.Fatal("arg", i, arg, "is not in proti:host:port or host:port format")
 		}
 
-		addr := host + ":" + port
-		listenAndForward(porti, addr)
-		if !hosts[host] {
-			hosts[host] = true
+		if hosts[host] == nil {
+			hosts[host] = NewDnsProbe(host)
 			slog.Info("Starting DNS probe", "host", host)
-			go dnsProbe(host)
+			go hosts[host].dnsProbe()
 		}
+
+		_, ok := checkOption(options[1:], "http")
+		if ok {
+			listenerAndForwardHttp(porti, host, port, clientProxyProtocol, serverProxyProtocol, false, tls.Certificate{}, hosts[host])
+		} else if _, ok := checkOption(options[1:], "https"); ok {
+			if cert == "" || key == "" {
+				//generate self signed key pair
+				cert, key = generateSelfSignedCert()
+				slog.Info("Self signed certificate generated", "cert", cert, "key", key)
+			}
+			cer, err := tls.LoadX509KeyPair(cert, key)
+			if err != nil {
+				log.Fatal(err)
+			}
+			listenerAndForwardHttp(porti, host, port, clientProxyProtocol, serverProxyProtocol, true, cer, hosts[host])
+		} else {
+			addr := host + ":" + port
+			listenAndForward(porti, addr, clientProxyProtocol, serverProxyProtocol)
+		}
+
 	}
 	slog.Info("Running...")
 }
 
 func main() {
+	serverProxyProtocol := flag.Bool("server-proxy-protocol", false, "Enable proxy protocol on server side")
+	clientProxyProtocol := flag.Bool("client-proxy-protocol", false, "Enable proxy protocol on client side")
+	cert := flag.String("cert", "", "TLS certificate file")
+	key := flag.String("key", "", "TLS key file")
+
 	flag.Usage = func() {
 		flagSet := flag.CommandLine
-		fmt.Printf("Usage of %s: %s\n", os.Args[0], "<port:host:port...>")
+		fmt.Printf("Usage of %s: %s\n", os.Args[0], "<(port:)?host:port(,option,...)? ...>")
 		flagSet.PrintDefaults()
 	}
 
 	flag.Parse()
+	slog.Info(os.Args[0], "build", Build, "version", Version, "date", Date)
 
 	if flag.NArg() == 0 {
 		flag.Usage()
 		os.Exit(1)
 	}
 
-	smain(flag.Args())
+	smain(flag.Args(), *clientProxyProtocol, *serverProxyProtocol, *cert, *key)
 
 	c := make(chan int)
 	<-c
