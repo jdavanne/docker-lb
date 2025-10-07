@@ -7,8 +7,11 @@ DATE := $(shell date +'%Y-%m-%d_%H:%M:%S')
 BUILD := $(shell git rev-parse HEAD | cut -c1-8)
 LDFLAGS :=-ldflags '-s -w  -X=main.Version=$(VERSION) -X=main.Build=$(BUILD) -X=main.Date=$(DATE)'
 
-build: 
+build:
 	CGO_ENABLED=0 go build $(LDFLAGS) -o ./bin/$(NAME) ./src
+
+test:
+	go test -v ./src/
 
 docker:
 	docker buildx build --platform ${PLATFORM} -t davinci1976/docker-lb:latest .

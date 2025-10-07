@@ -6,6 +6,7 @@ A lightweight TCP/HTTP/HTTPS load balancer with dynamic DNS resolution, designed
 
 - **TCP Load Balancing**: Random selection across available backends
 - **HTTP/HTTPS Load Balancing**: Cookie-based session affinity for sticky sessions
+- **Port Range Mapping**: Map multiple ports in a single command using ranges (e.g., `8080-8090`)
 - **Dynamic DNS Resolution**: Automatically discovers and updates backend IPs
 - **Proxy Protocol Support**: Preserves original client IPs
 - **TLS Support**: HTTPS with auto-generated or custom certificates
@@ -35,6 +36,25 @@ lb [options] <port-mapping> [<port-mapping>...]
 - **TCP**: `[listen_port:]hostname:backend_port`
 - **HTTP**: `[listen_port:]hostname:backend_port,http`
 - **HTTPS**: `[listen_port:]hostname:backend_port,https`
+
+#### Port Range Syntax:
+Ports can be specified as single values or as ranges:
+- **Single port**: `8080`
+- **Port range**: `8080-8090` (expands to 8080, 8081, ..., 8090)
+
+**Important**: When using ranges, both listen and backend port ranges must have the same length.
+
+**Examples**:
+```bash
+# Map ports 8080-8083 to backend ports 9000-9003
+lb 8080-8083:backend:9000-9003
+
+# Map the same port range on both sides
+lb 8080-8090:backend:8080-8090,http
+
+# Multiple port ranges for HTTPS
+lb 8443-8445:backend:9443-9445,https
+```
 
 #### Options:
 - `--verbose`: Enable detailed logging
@@ -125,6 +145,24 @@ services:
     ]
 ```
 
+#### Port Range Mapping
+```yml
+version: "3"
+services:
+  lb:
+    image: davinci1976/docker-lb:latest
+    ports:
+      - "8080-8090:8080-8090"  # Expose port range
+    command: [
+      "/bin/lb",
+      "8080-8090:backend:9000-9010,http"  # Map 11 ports
+    ]
+
+  backend:
+    scale: 3
+    # Services listening on ports 9000-9010
+```
+
 ### Scaling Services
 ```bash
 # Scale the backend service
@@ -159,7 +197,10 @@ make build
 # Docker build
 make docker
 
-# Run tests
+# Run unit tests
+make test
+
+# Run integration tests
 make docker-test
 ```
 

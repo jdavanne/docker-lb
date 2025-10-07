@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -52,23 +53,77 @@ func checkOption(options []string, name string) (string, bool) {
 	return "", false
 }
 
+// parsePortRange parses a port string which can be a single port or a range (port1-port2)
+// Returns a slice of port strings
+func parsePortRange(portStr string) ([]string, error) {
+	if !strings.Contains(portStr, "-") {
+		// Single port
+		return []string{portStr}, nil
+	}
+
+	// Port range
+	parts := strings.SplitN(portStr, "-", 2)
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("invalid port range format: %s", portStr)
+	}
+
+	port1, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return nil, fmt.Errorf("invalid start port in range %s: %v", portStr, err)
+	}
+
+	port2, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return nil, fmt.Errorf("invalid end port in range %s: %v", portStr, err)
+	}
+
+	if port1 > port2 {
+		return nil, fmt.Errorf("invalid port range %s: start port must be <= end port", portStr)
+	}
+
+	// Expand range
+	var ports []string
+	for port := port1; port <= port2; port++ {
+		ports = append(ports, strconv.Itoa(port))
+	}
+
+	return ports, nil
+}
+
 func smain(args []string, clientProxyProtocol, serverProxyProtocol bool, cert, key string) {
 	hosts := make(map[string]*DnsProbe)
 	for i, arg := range args {
 		// fmt.Println(arg)
 		options := strings.Split(arg, ",")
 		mappings := strings.Split(options[0], ":")
-		var porti, host, port string
+		var portiStr, host, portStr string
 		if len(mappings) == 3 {
-			porti = mappings[0]
+			portiStr = mappings[0]
 			host = mappings[1]
-			port = mappings[2]
+			portStr = mappings[2]
 		} else if len(mappings) == 2 {
-			porti = mappings[1]
+			portiStr = mappings[1]
 			host = mappings[0]
-			port = mappings[1]
+			portStr = mappings[1]
 		} else {
 			log.Fatal("arg", i, arg, "is not in proti:host:port or host:port format")
+		}
+
+		// Parse port ranges
+		listenPorts, err := parsePortRange(portiStr)
+		if err != nil {
+			log.Fatalf("arg %d: error parsing listen port range: %v", i, err)
+		}
+
+		backendPorts, err := parsePortRange(portStr)
+		if err != nil {
+			log.Fatalf("arg %d: error parsing backend port range: %v", i, err)
+		}
+
+		// Validate that ranges have the same length
+		if len(listenPorts) != len(backendPorts) {
+			log.Fatalf("arg %d: listen port range (%d ports) and backend port range (%d ports) must have the same length",
+				i, len(listenPorts), len(backendPorts))
 		}
 
 		if hosts[host] == nil {
@@ -77,23 +132,29 @@ func smain(args []string, clientProxyProtocol, serverProxyProtocol bool, cert, k
 			go hosts[host].dnsProbe()
 		}
 
-		_, ok := checkOption(options[1:], "http")
-		if ok {
-			listenerAndForwardHttp(porti, host, port, clientProxyProtocol, serverProxyProtocol, false, tls.Certificate{}, hosts[host])
-		} else if _, ok := checkOption(options[1:], "https"); ok {
-			if cert == "" || key == "" {
-				//generate self signed key pair
-				cert, key = generateSelfSignedCert()
-				slog.Info("Self signed certificate generated", "cert", cert, "key", key)
+		// Create service for each port in the range
+		for j := range len(listenPorts) {
+			porti := listenPorts[j]
+			port := backendPorts[j]
+
+			_, ok := checkOption(options[1:], "http")
+			if ok {
+				listenerAndForwardHttp(porti, host, port, clientProxyProtocol, serverProxyProtocol, false, tls.Certificate{}, hosts[host])
+			} else if _, ok := checkOption(options[1:], "https"); ok {
+				if cert == "" || key == "" {
+					//generate self signed key pair
+					cert, key = generateSelfSignedCert()
+					slog.Info("Self signed certificate generated", "cert", cert, "key", key)
+				}
+				cer, err := tls.LoadX509KeyPair(cert, key)
+				if err != nil {
+					log.Fatal(err)
+				}
+				listenerAndForwardHttp(porti, host, port, clientProxyProtocol, serverProxyProtocol, true, cer, hosts[host])
+			} else {
+				addr := host + ":" + port
+				listenAndForward(porti, addr, clientProxyProtocol, serverProxyProtocol)
 			}
-			cer, err := tls.LoadX509KeyPair(cert, key)
-			if err != nil {
-				log.Fatal(err)
-			}
-			listenerAndForwardHttp(porti, host, port, clientProxyProtocol, serverProxyProtocol, true, cer, hosts[host])
-		} else {
-			addr := host + ":" + port
-			listenAndForward(porti, addr, clientProxyProtocol, serverProxyProtocol)
 		}
 
 	}
@@ -108,7 +169,7 @@ func main() {
 
 	flag.Usage = func() {
 		flagSet := flag.CommandLine
-		fmt.Printf("Usage of %s: %s\n", os.Args[0], "<(port:)?host:port(,option,...)? ...>")
+		fmt.Printf("Usage of %s: %s\n", os.Args[0], "<(port[-port2]:)?host:port[-port2](,option,...)? ...>")
 		flagSet.PrintDefaults()
 	}
 

@@ -1,14 +1,15 @@
 
 services:
   lb:
-    build: 
-      platforms: 
-        - ${PLATFORM}
+    build:
       context: ./
     image: docker-lb
     ports:
       - "10123:10123"
-    command: ["/bin/lb", "10123:service1:8081" , "10124:service2:8081,http", "10125:service2:8081,https"]
+      - "10126:10126"
+      - "10127:10127"
+      - "10128:10128"
+    command: ["/bin/lb", "10123:service1:8081" , "10124:service2:8081,http", "10125:service2:8081,https", "10126-10128:service3:9000-9002,http"]
 
   service1:
     scale: 5
@@ -20,11 +21,17 @@ services:
     image: alpine
     command: ["/bin/sh", "-c", "while true; do echo 'waiting...'; echo 'HTTP/1.1 200 OK\n\nHello, world from service2 '$$HOSTNAME'!' | nc -l -p 8081 -w 30; done"]
 
+  service3:
+    scale: 3
+    image: alpine
+    command: ["/bin/sh", "-c", "while true; do echo 'waiting on 9000...'; echo 'HTTP/1.1 200 OK\n\nHello from service3 port 9000 on '$$HOSTNAME'!' | nc -l -p 9000 -w 30; done & while true; do echo 'waiting on 9001...'; echo 'HTTP/1.1 200 OK\n\nHello from service3 port 9001 on '$$HOSTNAME'!' | nc -l -p 9001 -w 30; done & while true; do echo 'waiting on 9002...'; echo 'HTTP/1.1 200 OK\n\nHello from service3 port 9002 on '$$HOSTNAME'!' | nc -l -p 9002 -w 30; done"]
+
   sut:
-    build: 
+    build:
       context: ./tests/sut
     depends_on:
       - lb
       - service1
       - service2
+      - service3
   
