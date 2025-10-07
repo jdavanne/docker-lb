@@ -17,11 +17,9 @@ const (
 	cookieName = "proxy-affinity"
 )
 
-func listenerAndForwardHttp(porti, host, port string, clientProxyProtocol, serverProxyProtocol, isTls bool, cer tls.Certificate, probe *DnsProbe) {
-	//slog.Info("Forwarding", "port", porti, "addr", host+":"+port)
-
+func listenerAndForwardHttp(porti, host, port string, clientProxyProtocol, serverProxyProtocol, isTls bool, cer tls.Certificate, pool *BackendPool, selector BackendSelector, affinity *AffinityMap) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", handleRequestAndRedirect(host, port, isTls, probe))
+	mux.HandleFunc("/", handleRequestAndRedirect(host, port, pool, selector, affinity))
 
 	l1, err := net.Listen("tcp", ":"+porti)
 	if err != nil {
@@ -44,40 +42,68 @@ func listenerAndForwardHttp(porti, host, port string, clientProxyProtocol, serve
 		if serverProxyProtocol {
 			defer l2.Close()
 		}
-		slog.Info("Forwarding", "port", porti, "addr", host+":"+port, "listenaddr", l1.Addr())
+		slog.Info("Forwarding", "port", porti, "host", host, "backendPort", port, "algorithm", selector.Name(), "listenaddr", l1.Addr())
 		err := http.Serve(l3, mux)
 		slog.Error("http.Serve", "port", port, "err", err)
 	}()
 }
 
-func handleRequestAndRedirect(host, port string, isTls bool, probe *DnsProbe) http.HandlerFunc {
+func handleRequestAndRedirect(host, port string, pool *BackendPool, selector BackendSelector, affinity *AffinityMap) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		addr := host + ":" + port
 		newSession := false
-		cookie, err := r.Cookie(cookieName)
-		if err != nil || !probe.checkIp(cookie.Value) {
+
+		// Extract source IP for affinity tracking
+		sourceIP := ""
+		if remoteIP, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+			sourceIP = remoteIP
+		}
+
+		var backend *Backend
+		var err error
+
+		// Priority 1: Check IP affinity (if enabled)
+		if affinity != nil && sourceIP != "" {
+			if backendIP, found := affinity.Get(sourceIP); found {
+				if b := pool.GetBackend(backendIP); b != nil {
+					backend = b
+					slog.Info("IP affinity hit", "sourceIP", sourceIP, "backendIP", backendIP)
+				}
+			}
+		}
+
+		// Priority 2: Check cookie affinity
+		if backend == nil {
+			cookie, err := r.Cookie(cookieName)
+			if err == nil && pool.checkIp(cookie.Value) {
+				backend = pool.GetBackend(cookie.Value)
+				slog.Info("Cookie affinity hit", "sourceIP", sourceIP, "backendIP", cookie.Value)
+			}
+		}
+
+		// Priority 3: Use load balancing algorithm
+		if backend == nil {
 			newSession = true
-			// Cookie not found, set a new one
-			targetIP, err := probe.resolve()
+			backend, err = selector.Select(pool, sourceIP, affinity)
 			if err != nil {
-				slog.Error("resolveTargetIP", "host", host, "err", err)
+				slog.Error("Backend selection failed", "host", host, "err", err)
 				http.Error(w, "Service unavailable", http.StatusServiceUnavailable)
 				return
 			}
-			cookie = &http.Cookie{
-				Name:  cookieName,
-				Value: targetIP,
-				Path:  "/",
-			}
-			http.SetCookie(w, cookie)
 		}
-		targetAddr := cookie.Value + ":" + port
 
-		scheme := "http"
-		if isTls {
-			scheme = "https"
+		targetAddr := backend.IP + ":" + port
+
+		// Set cookie for future requests
+		cookie := &http.Cookie{
+			Name:  cookieName,
+			Value: backend.IP,
+			Path:  "/",
 		}
-		targetURL := fmt.Sprintf("%s://%s", scheme, targetAddr)
+		http.SetCookie(w, cookie)
+
+		// Always use HTTP to connect to backends (TLS is only for client connections)
+		targetURL := fmt.Sprintf("http://%s", targetAddr)
 		proxyURL, err := url.Parse(targetURL)
 		if err != nil {
 			http.Error(w, "Service unavailable", http.StatusServiceUnavailable)
@@ -87,7 +113,14 @@ func handleRequestAndRedirect(host, port string, isTls bool, probe *DnsProbe) ht
 		opened.Add(1)
 		defer opened.Add(-1)
 
-		slog.Info("Forwarding start", "port", port, "from", r.RemoteAddr, "scheme", scheme, "to", targetAddr, "newSession", newSession, "count", ops.Load(), "opened", opened.Load())
+		// Track connection
+		pool.OnConnect(backend)
+		defer pool.OnDisconnect(backend)
+		if affinity != nil && sourceIP != "" {
+			defer affinity.Touch(sourceIP)
+		}
+
+		slog.Info("Forwarding start", "port", port, "from", r.RemoteAddr, "to", targetAddr, "backend", backend.IP, "algorithm", selector.Name(), "newSession", newSession, "count", ops.Load(), "opened", opened.Load())
 
 		proxy := &httputil.ReverseProxy{
 			Rewrite: func(r *httputil.ProxyRequest) {
@@ -104,7 +137,7 @@ func handleRequestAndRedirect(host, port string, isTls bool, probe *DnsProbe) ht
 		proxy.ServeHTTP(w, r)
 
 		slog.Info("Forwarding close", "port", port, "from", r.RemoteAddr, "to", targetAddr,
-			"addr", addr,
+			"addr", addr, "backend", backend.IP,
 			"count", ops.Load(), "opened", opened.Load()-1,
 		)
 	}

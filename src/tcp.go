@@ -12,22 +12,44 @@ import (
 	"github.com/pires/go-proxyproto"
 )
 
-func forward(local net.Conn, addr string, port string, clientProxyProtocol bool) {
+func forward(local net.Conn, pool *BackendPool, port string, selector BackendSelector, affinity *AffinityMap, clientProxyProtocol bool) {
 	defer local.Close()
 
 	ops.Add(1)
 	opened.Add(1)
 	defer opened.Add(-1)
 
+	// Extract source IP for affinity tracking
+	sourceIP := ""
+	if remoteAddr, ok := local.RemoteAddr().(*net.TCPAddr); ok {
+		sourceIP = remoteAddr.IP.String()
+	}
+
+	// Select backend using algorithm and affinity
+	backend, err := selector.Select(pool, sourceIP, affinity)
+	if err != nil {
+		slog.Error("Backend selection failed", "port", port, "from", local.RemoteAddr(), "err", err)
+		return
+	}
+
+	addr := backend.IP + ":" + backend.Port
+
+	// Track connection
+	pool.OnConnect(backend)
+	defer pool.OnDisconnect(backend)
+	if affinity != nil && sourceIP != "" {
+		defer affinity.Touch(sourceIP)
+	}
+
 	// Connect to the remote server
 	remote, err := net.Dial("tcp", addr)
 	if err != nil {
-		slog.Error("Dial failed", "port", port, "from", local.RemoteAddr(), "addr", addr, "err", err)
+		slog.Error("Dial failed", "port", port, "from", local.RemoteAddr(), "addr", addr, "backend", backend.IP, "err", err)
 		return
 	}
 	defer remote.Close()
 
-	slog.Info("Forwarding start", "port", port, "from", local.RemoteAddr(), "to", remote.RemoteAddr(), "count", ops.Load(), "opened", opened.Load())
+	slog.Info("Forwarding start", "port", port, "from", local.RemoteAddr(), "to", remote.RemoteAddr(), "backend", backend.IP, "algorithm", selector.Name(), "count", ops.Load(), "opened", opened.Load())
 
 	if clientProxyProtocol {
 		// Create a proxyprotocol header or use HeaderProxyFromAddrs() if you
@@ -84,16 +106,18 @@ func forward(local net.Conn, addr string, port string, clientProxyProtocol bool)
 	duration := end.Sub(start)
 	cumSent.Add(sent)
 	cumReceived.Add(received)
+
+	// Track bytes for backend
+	pool.AddBytes(backend, sent+received)
+
 	slog.Info("Forwarding close", "port", port, "from", local.RemoteAddr(), "to", remote.RemoteAddr(),
-		"addr", addr, "sent", sent, "received", received, "duration", duration,
+		"addr", addr, "backend", backend.IP, "sent", sent, "received", received, "duration", duration,
 		"count", ops.Load(), "opened", opened.Load()-1,
 		"cumSent", cumSent.Load(), "cumReceived", cumReceived.Load(),
 	)
 }
 
-func listenAndForward(port string, addr string, clientProxyProtocol, serverProxyProtocol bool) {
-	//slog.Info("Forwarding", "port", port, "addr", addr)
-
+func listenAndForward(port string, pool *BackendPool, selector BackendSelector, affinity *AffinityMap, clientProxyProtocol, serverProxyProtocol bool) {
 	l1, err := net.Listen("tcp", ":"+port)
 	if err != nil {
 		log.Fatal(err)
@@ -109,7 +133,7 @@ func listenAndForward(port string, addr string, clientProxyProtocol, serverProxy
 		if serverProxyProtocol {
 			defer l2.Close()
 		}
-		slog.Info("Forwarding", "port", port, "addr", addr, "listenaddr", l1.Addr())
+		slog.Info("Forwarding", "port", port, "host", pool.host, "backendPort", pool.port, "algorithm", selector.Name(), "listenaddr", l1.Addr())
 		for {
 			// Wait for a connection.
 			conn, err := l2.Accept()
@@ -119,7 +143,7 @@ func listenAndForward(port string, addr string, clientProxyProtocol, serverProxy
 			// Handle the connection in a new goroutine.
 			// The loop then returns to accepting, so that
 			// multiple connections may be served concurrently.
-			go forward(conn, addr, port, clientProxyProtocol)
+			go forward(conn, pool, port, selector, affinity, clientProxyProtocol)
 		}
 	}()
 }

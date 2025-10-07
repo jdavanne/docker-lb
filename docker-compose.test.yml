@@ -1,30 +1,55 @@
-
 services:
   lb:
     build:
       context: ./
     image: docker-lb
     ports:
+      - "18080:8080" # Stats API
       - "10123:10123"
+      - "10124:10124"
+      - "10125:10125"
       - "10126:10126"
       - "10127:10127"
       - "10128:10128"
-    command: ["/bin/lb", "10123:service1:8081" , "10124:service2:8081,http", "10125:service2:8081,https", "10126-10128:service3:9000-9002,http"]
+      - "10129:10129"
+      - "10130:10130"
+      - "10131:10131"
+      - "10132:10132"
+      - "10133:10133"
+      - "10134:10134"
+    command:
+      [
+        "/bin/lb",
+        "--verbose",
+        "10123:service1:8081,lb=random",
+        "10124:service2:8081,http,lb=round-robin",
+        "10125:service2:8081,https,lb=least-connection",
+        "10126-10128:service3:9000-9002,http,lb=weighted-random",
+        "10129:service1:8081,lb=round-robin,affinity",
+        "10130:service2:8081,http,lb=least-connection,affinity",
+        "10131:service3:9000,http,lb=weighted-random,affinity",
+        "10132:service1:8081,lb=round-robin",
+        "10133:service2:8081,lb=least-connection",
+        "10134:service3:9000,lb=weighted-random",
+      ]
 
   service1:
+    build:
+      context: ./tests/backend
     scale: 5
-    image: alpine
-    command: ["/bin/sh", "-c", "while true; do echo 'waiting...'; echo 'HTTP/1.1 200 OK\n\nHello, world from service1 '$$HOSTNAME'!' | nc -l -p 8081 -w 30; done"]
+    command: ["/backend", "-service", "service1", "-ports", "8081"]
 
   service2:
+    build:
+      context: ./tests/backend
     scale: 5
-    image: alpine
-    command: ["/bin/sh", "-c", "while true; do echo 'waiting...'; echo 'HTTP/1.1 200 OK\n\nHello, world from service2 '$$HOSTNAME'!' | nc -l -p 8081 -w 30; done"]
+    command: ["/backend", "-service", "service2", "-ports", "8081"]
 
   service3:
+    build:
+      context: ./tests/backend
     scale: 3
-    image: alpine
-    command: ["/bin/sh", "-c", "while true; do echo 'waiting on 9000...'; echo 'HTTP/1.1 200 OK\n\nHello from service3 port 9000 on '$$HOSTNAME'!' | nc -l -p 9000 -w 30; done & while true; do echo 'waiting on 9001...'; echo 'HTTP/1.1 200 OK\n\nHello from service3 port 9001 on '$$HOSTNAME'!' | nc -l -p 9001 -w 30; done & while true; do echo 'waiting on 9002...'; echo 'HTTP/1.1 200 OK\n\nHello from service3 port 9002 on '$$HOSTNAME'!' | nc -l -p 9002 -w 30; done"]
+    command: ["/backend", "-service", "service3", "-ports", "9000,9001,9002"]
 
   sut:
     build:
@@ -34,4 +59,3 @@ services:
       - service1
       - service2
       - service3
-  

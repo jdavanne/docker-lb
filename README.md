@@ -4,10 +4,16 @@ A lightweight TCP/HTTP/HTTPS load balancer with dynamic DNS resolution, designed
 
 ## Features
 
-- **TCP Load Balancing**: Random selection across available backends
-- **HTTP/HTTPS Load Balancing**: Cookie-based session affinity for sticky sessions
-- **Port Range Mapping**: Map multiple ports in a single command using ranges (e.g., `8080-8090`)
+- **Multiple Load Balancing Algorithms**:
+  - **Random**: Simple random selection (default)
+  - **Round-Robin**: Sequential distribution across backends
+  - **Least-Connection**: Routes to backend with fewest active connections
+  - **Weighted-Random**: Intelligent probabilistic selection using connection counts
+- **IP Affinity**: Source IP-based sticky sessions with configurable TTL (default: 30s)
+- **HTTP/HTTPS Cookie Affinity**: Cookie-based session persistence
+- **Port Range Mapping**: Map multiple ports in a single command (e.g., `8080-8090:backend:9000-9100`)
 - **Dynamic DNS Resolution**: Automatically discovers and updates backend IPs
+- **Connection Tracking**: Per-backend metrics (active connections, total requests, bytes transferred)
 - **Proxy Protocol Support**: Preserves original client IPs
 - **TLS Support**: HTTPS with auto-generated or custom certificates
 - **Real-time Metrics**: Connection tracking and data transfer monitoring
@@ -58,11 +64,85 @@ lb 8443-8445:backend:9443-9445,https
 
 #### Options:
 - `--verbose`: Enable detailed logging
+- `--lb-algorithm <algo>`: Global load balancing algorithm: `random`, `round-robin`, `least-connection`, `weighted-random` (default: `random`)
+- `--affinity-ttl <duration>`: IP affinity TTL in seconds (default: 30s, 0 to disable)
+- `--backend-weights <config>`: Explicit backend weights for weighted-random (format: `host:ip1=weight1,ip2=weight2;...`)
 - `--probe-period <duration>`: DNS probe interval (default: 2s)
 - `--server-proxy-protocol`: Enable proxy protocol on server side
-- `--client-proxy-protocol`: Enable proxy protocol on client side  
+- `--client-proxy-protocol`: Enable proxy protocol on client side
 - `--cert <file>`: TLS certificate file for HTTPS
 - `--key <file>`: TLS key file for HTTPS
+
+### Load Balancing Algorithms
+
+#### Random (default)
+- Pure random selection from available backends
+- Stateless, simple, good for stateless services
+- No connection awareness
+
+```bash
+lb 8080:backend:9000
+# or explicitly:
+lb 8080:backend:9000,lb=random
+```
+
+#### Round-Robin
+- Sequential rotation through backends
+- Fair distribution over time
+- No connection awareness
+
+```bash
+lb 8080:backend:9000,lb=round-robin
+```
+
+#### Least-Connection
+- Always selects backend with minimum active connections
+- Best for long-lived connections (WebSockets, streaming)
+- Deterministic selection
+
+```bash
+lb 8080:backend:9000,http,lb=least-connection
+```
+
+#### Weighted-Random (Intelligent Default)
+- **By default**: Uses inverse connection counts as implicit weights
+  - Backends with fewer connections get higher selection probability
+  - Provides gradual, probabilistic load balancing
+  - Prevents thundering herd to newly available backends
+- **With explicit weights**: Uses configured weights only (ignores connections)
+
+```bash
+# Implicit weights (connection-based)
+lb 8080:backend:9000,lb=weighted-random
+
+# Explicit weights (manual control)
+lb --backend-weights backend:10.0.0.1=100,10.0.0.2=50,10.0.0.3=10 \
+  8080:backend:9000,lb=weighted-random
+```
+
+### IP Affinity
+
+Source IP-based sticky sessions with configurable TTL:
+
+```bash
+# Enable affinity with default 30s TTL
+lb 8080:backend:9000,affinity
+
+# Custom TTL
+lb --affinity-ttl 60s 8080:backend:9000,affinity
+
+# Disable affinity globally
+lb --affinity-ttl 0 8080:backend:9000
+
+# Combine with algorithms
+lb 8080:backend:9000,http,lb=least-connection,affinity
+```
+
+**How it works:**
+1. First request from source IP → backend selected by algorithm
+2. Subsequent requests from same IP → same backend (if available)
+3. TTL resets on connection close (keeps sessions alive)
+4. After TTL expires → new backend selection
 
 ### Docker Compose Examples
 
@@ -163,6 +243,29 @@ services:
     # Services listening on ports 9000-9010
 ```
 
+#### Algorithm Comparison with Affinity
+```yml
+version: "3"
+services:
+  lb:
+    image: davinci1976/docker-lb:latest
+    ports:
+      - "8080-8083:8080-8083"
+    command: [
+      "/bin/lb",
+      "--verbose",
+      "--affinity-ttl", "60s",
+      "8080:backend:9000,lb=random,affinity",
+      "8081:backend:9000,lb=round-robin,affinity",
+      "8082:backend:9000,http,lb=least-connection,affinity",
+      "8083:backend:9000,http,lb=weighted-random,affinity"
+    ]
+
+  backend:
+    scale: 5
+    # Your service
+```
+
 ### Scaling Services
 ```bash
 # Scale the backend service
@@ -176,15 +279,31 @@ done
 
 ## Load Balancing Behavior
 
-### TCP Mode
-- Uses random selection for each new connection
-- No session persistence
-- Best for stateless TCP services
+### Algorithm Selection Priority
 
-### HTTP/HTTPS Mode  
+For each connection/request:
+1. **IP Affinity** (if enabled): Check if source IP has existing binding
+2. **Cookie Affinity** (HTTP/HTTPS only): Check for `proxy-affinity` cookie
+3. **Load Balancing Algorithm**: Use configured algorithm
+
+### Algorithm Comparison
+
+| Algorithm | Selection Logic | Connection Tracking | Best For |
+|-----------|----------------|---------------------|----------|
+| **random** | Pure random | ❌ No | Simple setups, stateless services |
+| **round-robin** | Sequential rotation | ❌ No | Fair distribution, stateless services |
+| **least-connection** | Min connections (deterministic) | ✅ Yes | Long-lived connections, WebSockets |
+| **weighted-random** | Probabilistic by connections | ✅ Yes | HTTP services, gradual balancing |
+
+### TCP Mode
+- Supports all load balancing algorithms
+- IP affinity available via `,affinity` option
+- Per-backend connection tracking
+
+### HTTP/HTTPS Mode
+- Supports all load balancing algorithms
 - Cookie-based session affinity using `proxy-affinity` cookie
-- New clients randomly assigned to available backends
-- Sessions stick to the same backend while it's available
+- IP affinity takes precedence over cookie affinity
 - Automatic failover if backend becomes unavailable
 
 ## Development
