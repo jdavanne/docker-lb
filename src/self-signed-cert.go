@@ -7,7 +7,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
-	"log"
+	"log/slog"
 	"math/big"
 	"os"
 	"time"
@@ -17,7 +17,8 @@ import (
 func generateSelfSignedCert() (string, string) {
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
-		log.Fatalf("Failed to generate private key: %v", err)
+		slog.Error("Failed to generate private key", "err", err)
+		os.Exit(1)
 	}
 
 	notBefore := time.Now()
@@ -25,7 +26,8 @@ func generateSelfSignedCert() (string, string) {
 
 	serialNumber, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
 	if err != nil {
-		log.Fatalf("Failed to generate serial number: %v", err)
+		slog.Error("Failed to generate serial number", "err", err)
+		os.Exit(1)
 	}
 
 	template := x509.Certificate{
@@ -43,23 +45,27 @@ func generateSelfSignedCert() (string, string) {
 
 	certDER, err := x509.CreateCertificate(rand.Reader, &template, &template, &priv.PublicKey, priv)
 	if err != nil {
-		log.Fatalf("Failed to create certificate: %v", err)
+		slog.Error("Failed to create certificate", "err", err)
+		os.Exit(1)
 	}
 
 	certOut, err := os.Create("cert.pem")
 	if err != nil {
-		log.Fatalf("Failed to open cert.pem for writing: %v", err)
+		slog.Error("Failed to open cert.pem for writing", "err", err)
+		os.Exit(1)
 	}
 	pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: certDER})
 	certOut.Close()
 
 	keyOut, err := os.Create("key.pem")
 	if err != nil {
-		log.Fatalf("Failed to open key.pem for writing: %v", err)
+		slog.Error("Failed to open key.pem for writing", "err", err)
+		os.Exit(1)
 	}
 	privBytes, err := x509.MarshalECPrivateKey(priv)
 	if err != nil {
-		log.Fatalf("Failed to marshal private key: %v", err)
+		slog.Error("Failed to marshal private key", "err", err)
+		os.Exit(1)
 	}
 	pem.Encode(keyOut, &pem.Block{Type: "EC PRIVATE KEY", Bytes: privBytes})
 	keyOut.Close()

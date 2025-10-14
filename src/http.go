@@ -3,12 +3,12 @@ package main
 import (
 	"crypto/tls"
 	"fmt"
-	"log"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os"
 
 	"github.com/pires/go-proxyproto"
 )
@@ -23,7 +23,8 @@ func listenerAndForwardHttp(porti, host, port string, proxyConfig ProxyProtocolC
 
 	l1, err := net.Listen("tcp", ":"+porti)
 	if err != nil {
-		log.Fatal(err)
+		slog.Error("Failed to listen on TCP port", "port", porti, "err", err)
+		os.Exit(1)
 	}
 
 	l2 := l1

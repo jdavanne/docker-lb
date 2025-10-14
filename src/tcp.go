@@ -2,9 +2,9 @@ package main
 
 import (
 	"io"
-	"log"
 	"log/slog"
 	"net"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -120,7 +120,8 @@ func forward(local net.Conn, pool *BackendPool, port string, selector BackendSel
 func listenAndForward(port string, pool *BackendPool, selector BackendSelector, affinity *AffinityMap, proxyConfig ProxyProtocolConfig) {
 	l1, err := net.Listen("tcp", ":"+port)
 	if err != nil {
-		log.Fatal(err)
+		slog.Error("Failed to listen on TCP port", "port", port, "err", err)
+		os.Exit(1)
 	}
 
 	l2 := l1
@@ -139,7 +140,8 @@ func listenAndForward(port string, pool *BackendPool, selector BackendSelector, 
 			// Wait for a connection.
 			conn, err := l2.Accept()
 			if err != nil {
-				log.Fatal(err)
+				slog.Error("Failed to accept connection", "port", port, "err", err)
+				os.Exit(1)
 			}
 			// Handle the connection in a new goroutine.
 			// The loop then returns to accepting, so that

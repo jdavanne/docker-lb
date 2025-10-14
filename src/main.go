@@ -4,7 +4,6 @@ import (
 	"crypto/tls"
 	"flag"
 	"fmt"
-	"log"
 	"log/slog"
 	"os"
 	"runtime"
@@ -48,11 +47,13 @@ func PrintMemUsage() {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	// For info on each, see: https://golang.org/pkg/runtime/#MemStats
-	fmt.Printf("GoRoutine=%v", runtime.NumGoroutine())
-	fmt.Printf("\tAlloc=%v KiB", m.Alloc/1024)
-	fmt.Printf("\tTotalAlloc=%v KiB", m.TotalAlloc/1024)
-	fmt.Printf("\tSys=%v KiB", m.Sys/1024)
-	fmt.Printf("\tNumGC=%v\n", m.NumGC)
+	slog.Info("Memory usage",
+		"goroutines", runtime.NumGoroutine(),
+		"alloc_kib", m.Alloc/1024,
+		"total_alloc_kib", m.TotalAlloc/1024,
+		"sys_kib", m.Sys/1024,
+		"num_gc", m.NumGC,
+	)
 }
 func checkOption(options []string, name string) (string, bool) {
 	for _, option := range options {
@@ -236,24 +237,27 @@ func smain(args []string, clientProxyProtocol, serverProxyProtocol bool, cert, k
 			host = mappings[0]
 			portStr = mappings[1]
 		} else {
-			log.Fatal("arg", i, arg, "is not in porti:host:port or host:port format")
+			slog.Error("Invalid argument format", "arg", i, "value", arg, "expected", "porti:host:port or host:port")
+			os.Exit(1)
 		}
 
 		// Parse port ranges
 		listenPorts, err := parsePortRange(portiStr)
 		if err != nil {
-			log.Fatalf("arg %d: error parsing listen port range: %v", i, err)
+			slog.Error("Error parsing listen port range", "arg", i, "err", err)
+			os.Exit(1)
 		}
 
 		backendPorts, err := parsePortRange(portStr)
 		if err != nil {
-			log.Fatalf("arg %d: error parsing backend port range: %v", i, err)
+			slog.Error("Error parsing backend port range", "arg", i, "err", err)
+			os.Exit(1)
 		}
 
 		// Validate that ranges have the same length
 		if len(listenPorts) != len(backendPorts) {
-			log.Fatalf("arg %d: listen port range (%d ports) and backend port range (%d ports) must have the same length",
-				i, len(listenPorts), len(backendPorts))
+			slog.Error("Port range mismatch", "arg", i, "listenPorts", len(listenPorts), "backendPorts", len(backendPorts))
+			os.Exit(1)
 		}
 
 		// Parse options
@@ -271,7 +275,8 @@ func smain(args []string, clientProxyProtocol, serverProxyProtocol bool, cert, k
 		// Parse proxy protocol configuration
 		proxyConfig, err := parseProxyProtocolConfig(options[1:], clientProxyProtocol, serverProxyProtocol)
 		if err != nil {
-			log.Fatalf("arg %d: %v", i, err)
+			slog.Error("Error parsing proxy protocol config", "arg", i, "err", err)
+			os.Exit(1)
 		}
 
 		// Create service for each port in the range
@@ -320,7 +325,8 @@ func smain(args []string, clientProxyProtocol, serverProxyProtocol bool, cert, k
 			// Create backend selector
 			selector, err := NewSelector(algorithm, hasExplicitWeights)
 			if err != nil {
-				log.Fatalf("arg %d: %v", i, err)
+				slog.Error("Error creating selector", "arg", i, "algorithm", algorithm, "err", err)
+				os.Exit(1)
 			}
 
 			// Register selector with stats server
@@ -337,7 +343,8 @@ func smain(args []string, clientProxyProtocol, serverProxyProtocol bool, cert, k
 				}
 				cer, err := tls.LoadX509KeyPair(cert, key)
 				if err != nil {
-					log.Fatal(err)
+					slog.Error("Failed to load TLS certificate", "cert", cert, "key", key, "err", err)
+					os.Exit(1)
 				}
 				listenerAndForwardHttp(porti, host, port, proxyConfig, true, cer, pool, selector, affinity)
 			} else {
