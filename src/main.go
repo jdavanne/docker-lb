@@ -23,6 +23,14 @@ var Build string = "dev"
 // Date of the build software
 var Date string
 
+// ProxyProtocolConfig holds proxy protocol configuration
+type ProxyProtocolConfig struct {
+	ServerEnabled bool
+	ServerVersion byte // 1 or 2
+	ClientEnabled bool
+	ClientVersion byte // 1 or 2
+}
+
 var (
 	probePeriod      = flag.Duration("probe-period", 2*time.Second, "Probe period")
 	verbose          = flag.Bool("verbose", false, "Verbose mode")
@@ -108,6 +116,60 @@ func parseBackendWeights(weightStr string) map[string]map[string]int {
 	}
 
 	return result
+}
+
+// parseProxyProtocolOption parses proxy protocol option value (v1, v2, or empty)
+// Returns (enabled, version, error)
+func parseProxyProtocolOption(value string) (bool, byte, error) {
+	if value == "" {
+		return false, 0, nil
+	}
+	switch value {
+	case "v1", "1":
+		return true, 1, nil
+	case "v2", "2":
+		return true, 2, nil
+	default:
+		return false, 0, fmt.Errorf("invalid proxy protocol version: %s (must be v1 or v2)", value)
+	}
+}
+
+// parseProxyProtocolConfig parses proxy protocol options from command-line options
+// Supports: proxy-server=v1|v2, proxy-client=v1|v2
+func parseProxyProtocolConfig(options []string, globalClient, globalServer bool) (ProxyProtocolConfig, error) {
+	config := ProxyProtocolConfig{}
+
+	// Check for per-mapping options first
+	serverOpt, hasServer := checkOption(options, "proxy-server")
+	clientOpt, hasClient := checkOption(options, "proxy-client")
+
+	if hasServer {
+		enabled, version, err := parseProxyProtocolOption(serverOpt)
+		if err != nil {
+			return config, err
+		}
+		config.ServerEnabled = enabled
+		config.ServerVersion = version
+	} else if globalServer {
+		// Fallback to global flag (backward compatibility)
+		config.ServerEnabled = true
+		config.ServerVersion = 1 // Default to v1 for backward compat
+	}
+
+	if hasClient {
+		enabled, version, err := parseProxyProtocolOption(clientOpt)
+		if err != nil {
+			return config, err
+		}
+		config.ClientEnabled = enabled
+		config.ClientVersion = version
+	} else if globalClient {
+		// Fallback to global flag (backward compatibility)
+		config.ClientEnabled = true
+		config.ClientVersion = 1 // Default to v1 for backward compat
+	}
+
+	return config, nil
 }
 
 // parsePortRange parses a port string which can be a single port or a range (port1-port2)
@@ -206,6 +268,12 @@ func smain(args []string, clientProxyProtocol, serverProxyProtocol bool, cert, k
 			algorithm = algorithmOpt
 		}
 
+		// Parse proxy protocol configuration
+		proxyConfig, err := parseProxyProtocolConfig(options[1:], clientProxyProtocol, serverProxyProtocol)
+		if err != nil {
+			log.Fatalf("arg %d: %v", i, err)
+		}
+
 		// Create service for each port in the range
 		for j := range len(listenPorts) {
 			porti := listenPorts[j]
@@ -260,7 +328,7 @@ func smain(args []string, clientProxyProtocol, serverProxyProtocol bool, cert, k
 
 			// Setup forwarding
 			if httpMode {
-				listenerAndForwardHttp(porti, host, port, clientProxyProtocol, serverProxyProtocol, false, tls.Certificate{}, pool, selector, affinity)
+				listenerAndForwardHttp(porti, host, port, proxyConfig, false, tls.Certificate{}, pool, selector, affinity)
 			} else if httpsMode {
 				if cert == "" || key == "" {
 					// Generate self signed key pair
@@ -271,10 +339,10 @@ func smain(args []string, clientProxyProtocol, serverProxyProtocol bool, cert, k
 				if err != nil {
 					log.Fatal(err)
 				}
-				listenerAndForwardHttp(porti, host, port, clientProxyProtocol, serverProxyProtocol, true, cer, pool, selector, affinity)
+				listenerAndForwardHttp(porti, host, port, proxyConfig, true, cer, pool, selector, affinity)
 			} else {
 				// TCP mode
-				listenAndForward(porti, pool, selector, affinity, clientProxyProtocol, serverProxyProtocol)
+				listenAndForward(porti, pool, selector, affinity, proxyConfig)
 			}
 		}
 	}

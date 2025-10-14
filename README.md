@@ -14,7 +14,7 @@ A lightweight TCP/HTTP/HTTPS load balancer with dynamic DNS resolution, designed
 - **Port Range Mapping**: Map multiple ports in a single command (e.g., `8080-8090:backend:9000-9100`)
 - **Dynamic DNS Resolution**: Automatically discovers and updates backend IPs
 - **Connection Tracking**: Per-backend metrics (active connections, total requests, bytes transferred)
-- **Proxy Protocol Support**: Preserves original client IPs
+- **Proxy Protocol Support**: v1/v2 support, per-mapping configuration, preserves original client IPs
 - **TLS Support**: HTTPS with auto-generated or custom certificates
 - **Real-time Metrics**: Connection tracking and data transfer monitoring
 
@@ -68,8 +68,8 @@ lb 8443-8445:backend:9443-9445,https
 - `--affinity-ttl <duration>`: IP affinity TTL in seconds (default: 30s, 0 to disable)
 - `--backend-weights <config>`: Explicit backend weights for weighted-random (format: `host:ip1=weight1,ip2=weight2;...`)
 - `--probe-period <duration>`: DNS probe interval (default: 2s)
-- `--server-proxy-protocol`: Enable proxy protocol on server side
-- `--client-proxy-protocol`: Enable proxy protocol on client side
+- `--server-proxy-protocol`: *(Deprecated)* Enable proxy protocol v1 on server side globally (use per-mapping `proxy-server` instead)
+- `--client-proxy-protocol`: *(Deprecated)* Enable proxy protocol v1 on client side globally (use per-mapping `proxy-client` instead)
 - `--cert <file>`: TLS certificate file for HTTPS
 - `--key <file>`: TLS key file for HTTPS
 
@@ -143,6 +143,121 @@ lb 8080:backend:9000,http,lb=least-connection,affinity
 2. Subsequent requests from same IP → same backend (if available)
 3. TTL resets on connection close (keeps sessions alive)
 4. After TTL expires → new backend selection
+
+### Proxy Protocol Support
+
+The PROXY protocol preserves original client IP addresses and connection information when traffic passes through proxies or load balancers. docker-lb supports both v1 (text) and v2 (binary) of the protocol, configurable per-mapping.
+
+#### What is PROXY Protocol?
+
+When a TCP connection passes through a proxy, the backend server sees the proxy's IP instead of the original client IP. The PROXY protocol solves this by prepending connection metadata to the TCP stream.
+
+- **Version 1 (v1)**: Human-readable text format (e.g., `PROXY TCP4 192.168.1.1 10.0.0.1 56324 443\r\n`)
+- **Version 2 (v2)**: Binary format, more efficient and supports additional metadata
+
+#### Configuration
+
+**Per-mapping options** (recommended):
+```bash
+# Server-side: docker-lb expects incoming connections to have PROXY headers
+lb 8080:backend:9000,proxy-server=v1
+
+# Client-side: docker-lb sends PROXY headers to backends
+lb 8080:backend:9000,proxy-client=v2
+
+# Both sides with different versions
+lb 8080:backend:9000,proxy-server=v1,proxy-client=v2
+
+# HTTP/HTTPS with proxy protocol
+lb 8080:backend:9000,http,proxy-server=v2
+lb 8443:backend:9443,https,proxy-client=v1
+```
+
+**Global options** (deprecated, applies v1 to all mappings):
+```bash
+lb --server-proxy-protocol --client-proxy-protocol 8080:backend:9000
+```
+
+#### When to Use
+
+**Server-side (`proxy-server`)**: Enable when docker-lb sits behind another proxy/load balancer that sends PROXY headers:
+```
+[Client] → [HAProxy/nginx with PROXY] → [docker-lb with proxy-server=v1] → [Backend]
+```
+
+**Client-side (`proxy-client`)**: Enable when backends support PROXY protocol and need original client IPs:
+```
+[Client] → [docker-lb with proxy-client=v2] → [Backend with PROXY support]
+```
+
+**Both sides**: Chain multiple proxies while preserving client IPs:
+```
+[Client] → [Frontend LB] → [docker-lb with proxy-server=v1,proxy-client=v2] → [Backend]
+```
+
+#### Docker Compose Examples
+
+**With nginx upstream (server-side)**:
+```yml
+services:
+  nginx:
+    image: nginx
+    command: >
+      sh -c "echo 'stream { server { listen 8080; proxy_protocol on; proxy_pass lb:8081; } }' > /etc/nginx/nginx.conf && nginx -g 'daemon off;'"
+    ports:
+      - "8080:8080"
+
+  lb:
+    image: davinci1976/docker-lb:latest
+    command: ["/bin/lb", "8081:backend:9000,proxy-server=v1"]
+
+  backend:
+    scale: 3
+    # Backend application
+```
+
+**Sending PROXY headers to backends (client-side)**:
+```yml
+services:
+  lb:
+    image: davinci1976/docker-lb:latest
+    ports:
+      - "8080:8080"
+    command: ["/bin/lb", "8080:backend:9000,proxy-client=v2"]
+
+  backend:
+    scale: 3
+    # Backend that supports PROXY protocol (e.g., nginx with proxy_protocol directive)
+```
+
+**Mixed versions**:
+```yml
+services:
+  lb:
+    image: davinci1976/docker-lb:latest
+    ports:
+      - "8080-8082:8080-8082"
+    command: [
+      "/bin/lb",
+      "8080:service1:9000,proxy-server=v1",           # Expects v1 from upstream
+      "8081:service2:9000,proxy-client=v2",           # Sends v2 to backend
+      "8082:service3:9000,proxy-server=v2,proxy-client=v1"  # Both
+    ]
+```
+
+#### Backend Support
+
+Common software supporting PROXY protocol:
+- **nginx**: `proxy_protocol` directive
+- **HAProxy**: `accept-proxy` / `send-proxy` / `send-proxy-v2`
+- **Apache**: `mod_remoteip` with `RemoteIPProxyProtocol`
+- **Traefik**: Native support
+- Most modern HTTP servers and proxies
+
+#### Version Selection
+
+- **Use v1** when: Interoperating with older systems, need human-readable debugging
+- **Use v2** when: Performance matters, need advanced features, modern infrastructure
 
 ### Docker Compose Examples
 

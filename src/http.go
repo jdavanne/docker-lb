@@ -17,7 +17,7 @@ const (
 	cookieName = "proxy-affinity"
 )
 
-func listenerAndForwardHttp(porti, host, port string, clientProxyProtocol, serverProxyProtocol, isTls bool, cer tls.Certificate, pool *BackendPool, selector BackendSelector, affinity *AffinityMap) {
+func listenerAndForwardHttp(porti, host, port string, proxyConfig ProxyProtocolConfig, isTls bool, cer tls.Certificate, pool *BackendPool, selector BackendSelector, affinity *AffinityMap) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", handleRequestAndRedirect(host, port, pool, selector, affinity))
 
@@ -27,8 +27,9 @@ func listenerAndForwardHttp(porti, host, port string, clientProxyProtocol, serve
 	}
 
 	l2 := l1
-	if serverProxyProtocol {
+	if proxyConfig.ServerEnabled {
 		l2 = &proxyproto.Listener{Listener: l1}
+		slog.Info("Server-side proxy protocol enabled", "port", porti, "version", proxyConfig.ServerVersion)
 	}
 
 	l3 := l2
@@ -39,7 +40,7 @@ func listenerAndForwardHttp(porti, host, port string, clientProxyProtocol, serve
 
 	go func() {
 		defer l1.Close()
-		if serverProxyProtocol {
+		if proxyConfig.ServerEnabled {
 			defer l2.Close()
 		}
 		slog.Info("Forwarding", "port", porti, "host", host, "backendPort", port, "algorithm", selector.Name(), "listenaddr", l1.Addr())

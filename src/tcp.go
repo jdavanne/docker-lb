@@ -12,7 +12,7 @@ import (
 	"github.com/pires/go-proxyproto"
 )
 
-func forward(local net.Conn, pool *BackendPool, port string, selector BackendSelector, affinity *AffinityMap, clientProxyProtocol bool) {
+func forward(local net.Conn, pool *BackendPool, port string, selector BackendSelector, affinity *AffinityMap, proxyConfig ProxyProtocolConfig) {
 	defer local.Close()
 
 	ops.Add(1)
@@ -51,11 +51,10 @@ func forward(local net.Conn, pool *BackendPool, port string, selector BackendSel
 
 	slog.Info("Forwarding start", "port", port, "from", local.RemoteAddr(), "to", remote.RemoteAddr(), "backend", backend.IP, "algorithm", selector.Name(), "count", ops.Load(), "opened", opened.Load())
 
-	if clientProxyProtocol {
-		// Create a proxyprotocol header or use HeaderProxyFromAddrs() if you
-		// have two conn's
+	if proxyConfig.ClientEnabled {
+		// Create a proxyprotocol header with configurable version
 		header := &proxyproto.Header{
-			Version:           1,
+			Version:           proxyConfig.ClientVersion,
 			Command:           proxyproto.PROXY,
 			TransportProtocol: proxyproto.TCPv4,
 			SourceAddr:        local.RemoteAddr(),
@@ -64,9 +63,10 @@ func forward(local net.Conn, pool *BackendPool, port string, selector BackendSel
 		// After the connection was created write the proxy headers first
 		_, err = header.WriteTo(remote)
 		if err != nil {
-			slog.Error("Proxy protocol header write failed", "port", port, "from", local.RemoteAddr(), "to", remote.RemoteAddr(), "addr", addr, "err", err)
+			slog.Error("Proxy protocol header write failed", "port", port, "from", local.RemoteAddr(), "to", remote.RemoteAddr(), "addr", addr, "version", proxyConfig.ClientVersion, "err", err)
 			return
 		}
+		slog.Info("Proxy protocol header sent", "port", port, "version", proxyConfig.ClientVersion, "backend", backend.IP)
 	}
 
 	var sent, received int64
@@ -117,20 +117,21 @@ func forward(local net.Conn, pool *BackendPool, port string, selector BackendSel
 	)
 }
 
-func listenAndForward(port string, pool *BackendPool, selector BackendSelector, affinity *AffinityMap, clientProxyProtocol, serverProxyProtocol bool) {
+func listenAndForward(port string, pool *BackendPool, selector BackendSelector, affinity *AffinityMap, proxyConfig ProxyProtocolConfig) {
 	l1, err := net.Listen("tcp", ":"+port)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	l2 := l1
-	if serverProxyProtocol {
+	if proxyConfig.ServerEnabled {
 		l2 = &proxyproto.Listener{Listener: l1}
+		slog.Info("Server-side proxy protocol enabled", "port", port, "version", proxyConfig.ServerVersion)
 	}
 
 	go func() {
 		defer l1.Close()
-		if serverProxyProtocol {
+		if proxyConfig.ServerEnabled {
 			defer l2.Close()
 		}
 		slog.Info("Forwarding", "port", port, "host", pool.host, "backendPort", pool.port, "algorithm", selector.Name(), "listenaddr", l1.Addr())
@@ -143,7 +144,7 @@ func listenAndForward(port string, pool *BackendPool, selector BackendSelector, 
 			// Handle the connection in a new goroutine.
 			// The loop then returns to accepting, so that
 			// multiple connections may be served concurrently.
-			go forward(conn, pool, port, selector, affinity, clientProxyProtocol)
+			go forward(conn, pool, port, selector, affinity, proxyConfig)
 		}
 	}()
 }
