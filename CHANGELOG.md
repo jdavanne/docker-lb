@@ -5,6 +5,49 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.5] - 2025-10-14
+
+### Added
+- **Proxy Protocol Version Selection**: Support for both v1 (text) and v2 (binary) of the PROXY protocol
+  - Client-side and server-side version selection
+  - Configurable per mapping or globally
+- **Per-Mapping Proxy Protocol Configuration**: Fine-grained control over proxy protocol per port
+  - `proxy-server=v1|v2`: Enable server-side proxy protocol (expects headers from upstream)
+  - `proxy-client=v1|v2`: Enable client-side proxy protocol (sends headers to backends)
+  - Mix versions across different services (e.g., `proxy-server=v1,proxy-client=v2`)
+  - Works with TCP, HTTP, and HTTPS modes
+- **Comprehensive Proxy Protocol Documentation**: New dedicated section in README with:
+  - Explanation of PROXY protocol and when to use it
+  - Configuration examples for all scenarios
+  - Backend support reference (nginx, HAProxy, Apache, Traefik)
+  - Docker Compose examples showing real-world usage
+  - Version selection guidance (v1 vs v2)
+- **22 New Unit Tests**: Full test coverage for proxy protocol configuration parsing
+  - `TestParseProxyProtocolOption`: 9 test cases for version string parsing
+  - `TestParseProxyProtocolConfig`: 13 test cases for configuration logic
+  - Tests cover edge cases, backward compatibility, and error conditions
+- **Structured Logging Throughout**: Complete migration to slog for consistent logging
+  - All error messages include contextual key-value pairs
+  - Better debugging with structured fields (port, arg, err, etc.)
+  - Machine-parseable log output for log aggregation tools
+
+### Changed
+- **Deprecated Global Proxy Protocol Flags**: `--server-proxy-protocol` and `--client-proxy-protocol` still work but marked as deprecated
+  - Default to v1 for backward compatibility
+  - Recommend using per-mapping `proxy-server` and `proxy-client` options instead
+- **Enhanced Error Logging**: All errors now use slog with contextual information
+  - Port numbers, argument indices, and error details in structured format
+  - Replaced `log.Fatal()` with `slog.Error()` + `os.Exit(1)`
+- **Memory Usage Logging**: `PrintMemUsage()` now outputs structured logs instead of printf format
+  - Uses key-value pairs: goroutines, alloc_kib, total_alloc_kib, sys_kib, num_gc
+- **Improved Proxy Protocol Logging**: Added version info to proxy protocol enable/send messages
+
+### Fixed
+- **Hardcoded Proxy Protocol Version**: Client-side proxy protocol now uses configurable version
+  - Previously always sent v1 headers regardless of configuration
+  - Now correctly sends v1 or v2 based on `ClientVersion` setting
+- **Removed Unused Imports**: Cleaned up standard `log` package imports after slog migration
+
 ## [0.0.4] - 2025-10-07
 
 ### Added
@@ -87,6 +130,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Makefile for build automation
 - Basic forwarding functionality
 
+[0.0.5]: https://github.com/davinci1976/docker-lb/compare/v0.0.4...v0.0.5
+[0.0.4]: https://github.com/davinci1976/docker-lb/compare/v0.0.3...v0.0.4
 [0.0.3]: https://github.com/davinci1976/docker-lb/compare/v0.0.2...v0.0.3
 [0.0.2]: https://github.com/davinci1976/docker-lb/compare/v0.0.1...v0.0.2
 [0.0.1]: https://github.com/davinci1976/docker-lb/releases/tag/v0.0.1
