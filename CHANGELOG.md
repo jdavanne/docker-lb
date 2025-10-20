@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.6] - 2025-10-20
+
+### Added
+- **Prometheus Metrics Endpoint**: Native `/metrics` endpoint without any dependencies
+  - Application metrics: `dockerlb_operations_total`, `dockerlb_connections_open`, `dockerlb_bytes_*`
+  - Per-backend metrics with labels: `dockerlb_backend_active_connections`, `dockerlb_backend_connections_total`, `dockerlb_backend_bytes_total`, `dockerlb_backend_weight`
+  - Pool metrics: `dockerlb_pool_backends`, `dockerlb_affinity_entries`
+  - Go runtime metrics: `go_goroutines`, `go_threads`, `go_info`, `go_memstats_*`, `go_gc_duration_seconds`
+  - Custom number formatting functions (formatUint64, formatInt64, formatFloat64) for zero-dependency implementation
+  - Prometheus text exposition format (version 0.0.4)
+- **DNS Subscriber Interface**: New interface for components that receive DNS updates
+  - `BackendPool` now implements `DNSSubscriber` interface
+  - `OnDNSUpdate(ips []string)` callback method for receiving IP list updates
+  - `GetHost()` and `GetPort()` methods for subscriber identification
+- **Memory Monitoring Goroutine**: Independent memory monitoring when `--verbose` is enabled
+  - Runs in dedicated goroutine started from `main()`
+  - Uses `--probe-period` for monitoring interval
+  - No longer coupled to DNS resolver logic
+
+### Changed
+- **DNS Resolver Mutualization**: Optimized DNS resolution to be shared across backend pools with the same hostname
+  - One DNS probe goroutine per unique hostname (instead of one per host:port combination)
+  - Subscriber pattern allows multiple `BackendPool` instances to share DNS updates
+  - Significantly reduced DNS query load when using port ranges or multiple ports for the same host
+  - Example: `8080-8083:service:9000-9003` now creates 1 DNS resolver instead of 4
+  - New `DNSResolver` component (`src/dns_resolver.go`) manages hostname resolution with multiple subscribers
+  - Improved resource efficiency with fewer goroutines and network calls
+- **Backend Pool Refactoring**: Removed DNS probing logic from `BackendPool`
+  - No longer runs its own `dnsProbe()` goroutine
+  - Receives DNS updates passively via `OnDNSUpdate()` callback
+  - Cleaner separation of concerns between DNS resolution and backend management
+
 ## [0.0.5] - 2025-10-14
 
 ### Added
@@ -130,6 +162,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Makefile for build automation
 - Basic forwarding functionality
 
+[0.0.6]: https://github.com/davinci1976/docker-lb/compare/v0.0.5...v0.0.6
 [0.0.5]: https://github.com/davinci1976/docker-lb/compare/v0.0.4...v0.0.5
 [0.0.4]: https://github.com/davinci1976/docker-lb/compare/v0.0.3...v0.0.4
 [0.0.3]: https://github.com/davinci1976/docker-lb/compare/v0.0.2...v0.0.3

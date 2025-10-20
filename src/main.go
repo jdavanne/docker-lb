@@ -214,6 +214,9 @@ func smain(args []string, clientProxyProtocol, serverProxyProtocol bool, cert, k
 	// Parse backend weights
 	backendWeights := parseBackendWeights(*backendWeightsFlag)
 
+	// Track DNS resolvers per host (not host:port)
+	resolvers := make(map[string]*DNSResolver)
+
 	// Track backend pools and affinity maps per host
 	pools := make(map[string]*BackendPool)
 	affinityMaps := make(map[string]*AffinityMap)
@@ -222,6 +225,16 @@ func smain(args []string, clientProxyProtocol, serverProxyProtocol bool, cert, k
 	statsServer := NewStatsServer()
 	if *statsPort != "" {
 		statsServer.Start(":" + *statsPort)
+	}
+
+	// Start memory monitoring goroutine if verbose
+	if *verbose {
+		go func() {
+			for {
+				time.Sleep(*probePeriod)
+				PrintMemUsage()
+			}
+		}()
 	}
 
 	for i, arg := range args {
@@ -279,6 +292,13 @@ func smain(args []string, clientProxyProtocol, serverProxyProtocol bool, cert, k
 			os.Exit(1)
 		}
 
+		// Create DNS resolver for this host if not exists
+		if resolvers[host] == nil {
+			resolvers[host] = NewDNSResolver(host, *probePeriod)
+			go resolvers[host].start()
+			slog.Info("Starting DNS resolver", "host", host, "probePeriod", *probePeriod)
+		}
+
 		// Create service for each port in the range
 		for j := range len(listenPorts) {
 			porti := listenPorts[j]
@@ -288,8 +308,10 @@ func smain(args []string, clientProxyProtocol, serverProxyProtocol bool, cert, k
 			poolKey := host + ":" + port
 			if pools[poolKey] == nil {
 				pools[poolKey] = NewBackendPool(host, port)
-				slog.Info("Starting DNS probe", "host", host, "port", port)
-				go pools[poolKey].dnsProbe()
+
+				// Subscribe pool to DNS resolver
+				resolvers[host].Subscribe(pools[poolKey])
+				slog.Info("Backend pool subscribed to DNS resolver", "host", host, "port", port)
 
 				// Apply backend weights if configured
 				if weights, ok := backendWeights[host]; ok {

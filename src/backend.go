@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"log/slog"
-	"net"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -28,9 +27,6 @@ type BackendPool struct {
 	backendList     []*Backend          // for iteration
 	mu              sync.RWMutex
 	roundRobinIndex atomic.Uint64
-
-	// DNS probe settings
-	probePeriod time.Duration
 }
 
 // NewBackendPool creates a new backend pool
@@ -40,7 +36,6 @@ func NewBackendPool(host, port string) *BackendPool {
 		port:        port,
 		backends:    make(map[string]*Backend),
 		backendList: make([]*Backend, 0),
-		probePeriod: *probePeriod,
 	}
 }
 
@@ -118,67 +113,64 @@ func (p *BackendPool) checkIp(ip string) bool {
 	return ok
 }
 
-// dnsProbe continuously probes DNS and updates the backend list
-func (p *BackendPool) dnsProbe() {
-	slog.Info("Resolving", "host", p.host)
-	round := 0
-	for {
-		if round != 0 {
-			time.Sleep(p.probePeriod)
-		}
-		round++
-		changed := 0
-		if *verbose {
-			PrintMemUsage()
-			slog.Info("Probing...", "host", p.host)
-		}
+// OnDNSUpdate is called when DNS resolver updates the IP list
+// Implements DNSSubscriber interface
+func (p *BackendPool) OnDNSUpdate(ips []string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 
-		ips, err := net.LookupIP(p.host)
-		if err != nil {
-			slog.Error("Lookup failed", "host", p.host, "err", err)
-			continue
-		}
+	now := time.Now()
+	changed := 0
 
-		p.mu.Lock()
-		now := time.Now()
-
-		// Mark existing backends
-		for _, ip := range ips {
-			ipStr := ip.String()
-			if p.backends[ipStr] == nil {
-				// New backend discovered
-				changed++
-				slog.Info("New", "host", p.host, "ip", ipStr)
-				p.backends[ipStr] = &Backend{
-					IP:       ipStr,
-					Port:     p.port,
-					Weight:   1, // default weight
-					LastSeen: now,
-				}
-			} else {
-				// Existing backend still present
-				p.backends[ipStr].LastSeen = now
-			}
-		}
-
-		// Remove backends that are no longer in DNS
-		for ip, backend := range p.backends {
-			if backend.LastSeen.Before(now) {
-				changed++
-				slog.Info("Lost", "host", p.host, "ip", ip)
-				delete(p.backends, ip)
-			}
-		}
-
-		// Rebuild backend list if changed
-		if changed != 0 {
-			p.backendList = make([]*Backend, 0, len(p.backends))
-			for _, backend := range p.backends {
-				p.backendList = append(p.backendList, backend)
-			}
-			slog.Info("Backend list updated", "host", p.host, "count", len(p.backendList))
-		}
-
-		p.mu.Unlock()
+	// Create map of new IPs for quick lookup
+	newIPMap := make(map[string]bool)
+	for _, ip := range ips {
+		newIPMap[ip] = true
 	}
+
+	// Add or update backends from new IP list
+	for _, ip := range ips {
+		if p.backends[ip] == nil {
+			// New backend discovered
+			changed++
+			slog.Info("New backend", "host", p.host, "port", p.port, "ip", ip)
+			p.backends[ip] = &Backend{
+				IP:       ip,
+				Port:     p.port,
+				Weight:   1, // default weight
+				LastSeen: now,
+			}
+		} else {
+			// Existing backend still present
+			p.backends[ip].LastSeen = now
+		}
+	}
+
+	// Remove backends that are no longer in DNS
+	for ip := range p.backends {
+		if !newIPMap[ip] {
+			changed++
+			slog.Info("Lost backend", "host", p.host, "port", p.port, "ip", ip)
+			delete(p.backends, ip)
+		}
+	}
+
+	// Rebuild backend list if changed
+	if changed != 0 {
+		p.backendList = make([]*Backend, 0, len(p.backends))
+		for _, backend := range p.backends {
+			p.backendList = append(p.backendList, backend)
+		}
+		slog.Info("Backend list updated", "host", p.host, "port", p.port, "count", len(p.backendList))
+	}
+}
+
+// GetHost returns the host name (implements DNSSubscriber interface)
+func (p *BackendPool) GetHost() string {
+	return p.host
+}
+
+// GetPort returns the backend port (implements DNSSubscriber interface)
+func (p *BackendPool) GetPort() string {
+	return p.port
 }

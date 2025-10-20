@@ -25,3 +25,12 @@ docker-push-dev:
  
 docker-test:
 	docker compose -f docker-compose.test.yml run --rm --remove-orphans --build sut 
+
+docker-all:
+	docker buildx build --platform linux/amd64,linux/arm64 -t davinci1976/docker-lb:latest -t davinci1976/docker-lb:${VERSION} --push .
+
+docker-amd64:
+	docker buildx build --pull --platform linux/amd64 -t davinci1976/docker-lb:latest -t davinci1976/docker-lb:${VERSION} --push .
+
+docker-arm64:
+	docker buildx build --pull --platform linux/arm64 -t davinci1976/docker-lb:latest -t davinci1976/docker-lb:${VERSION} --push .

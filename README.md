@@ -450,28 +450,85 @@ curl -b cookies.txt http://localhost:8080  # Use cookie for affinity
 
 ## Monitoring
 
+### Management API
+
+The load balancer exposes a management API on port 8080 (configurable via `--stats-port`):
+
+**JSON Endpoints:**
+```bash
+curl http://localhost:8080/health      # Health check
+curl http://localhost:8080/backends    # All backend pools
+curl http://localhost:8080/affinity    # Active affinity mappings
+curl http://localhost:8080/ports       # Per-port configuration
+```
+
+**Prometheus Metrics:**
+```bash
+curl http://localhost:8080/metrics     # Prometheus exposition format
+```
+
+### Prometheus Integration
+
+The `/metrics` endpoint provides comprehensive metrics without requiring any Prometheus client libraries:
+
+**Application Metrics:**
+- `dockerlb_operations_total` - Total operations
+- `dockerlb_connections_open` - Currently open connections
+- `dockerlb_bytes_sent_total` / `dockerlb_bytes_received_total` - Data transfer
+- `dockerlb_backend_active_connections{host,port,backend_ip,backend_port}` - Per-backend connections
+- `dockerlb_backend_connections_total{...}` - Total connections per backend
+- `dockerlb_backend_bytes_total{...}` - Bytes transferred per backend
+- `dockerlb_backend_weight{...}` - Load balancing weights
+- `dockerlb_pool_backends{host,port}` - Number of backends in pool
+- `dockerlb_affinity_entries{host}` - Active affinity entries
+
+**Go Runtime Metrics:**
+- `go_goroutines` - Number of goroutines
+- `go_info{version}` - Go version
+- `go_memstats_*` - Memory statistics (alloc, sys, heap, stack, GC)
+- `go_gc_duration_seconds` - Garbage collection metrics
+
+**Example Prometheus Configuration:**
+```yaml
+scrape_configs:
+  - job_name: 'docker-lb'
+    static_configs:
+      - targets: ['localhost:8080']
+```
+
+### Verbose Logging
+
 When running with `--verbose`, the load balancer provides:
 - Connection open/close events with source/destination
 - Data transfer statistics per connection
 - DNS resolution updates
-- Memory usage statistics
+- Periodic memory usage statistics
 - Cumulative metrics (total connections, data transferred)
+
+## Architecture Highlights
+
+### DNS Resolution Efficiency
+docker-lb uses a **mutualized DNS resolver architecture** where:
+- One DNS probe goroutine per unique hostname (not per host:port combination)
+- Multiple backend pools subscribe to the same DNS resolver
+- Significantly reduces DNS query load for port range mappings
+- Example: `8080-8090:service:9000-9010` creates 1 DNS resolver, not 11
+
+This design is especially efficient for Docker Compose scaled services where multiple ports map to the same hostname.
 
 ## Limitations
 
-- Load balancing algorithm is currently random only
 - HTTP/HTTPS mode requires cookie support from clients
 - No health checks (relies on DNS and connection failures)
 - No connection pooling or keep-alive optimization
 
 ## Possible Future Extensions
-- Additional load balancing algorithms (round-robin, least-connection, weighted)
-- Active health checks
+- Active health checks with automatic backend removal
 - Multiple service targets (blue/green deployments)
-- Connection pooling
+- Connection pooling and keep-alive optimization
 - Rate limiting and bandwidth controls
 - Circuit breaker patterns
-- WebSocket support
+- Enhanced WebSocket support
 
 
 

@@ -144,18 +144,3 @@ func handleRequestAndRedirect(host, port string, pool *BackendPool, selector Bac
 		)
 	}
 }
-
-/*
-func resolveTargetIP(host string) (string, error) {
-	ips, err := net.LookupIP(host)
-	if err != nil {
-		return "", err
-	}
-	for _, ip := range ips {
-		if ipv4 := ip.To4(); ipv4 != nil {
-			return ipv4.String(), nil
-		}
-	}
-	return "", fmt.Errorf("no IPv4 address found for host %s", host)
-}
-*/
