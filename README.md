@@ -48,11 +48,13 @@ Ports can be specified as single values or as ranges:
 - **Single port**: `8080`
 - **Port range**: `8080-8090` (expands to 8080, 8081, ..., 8090)
 
-**Important**: When using ranges, both listen and backend port ranges must have the same length.
+**Port range rules**:
+- Both listen and backend port ranges have the same length (e.g., `8080-8083:host:9000-9003`)
+- Or backend can be a single port to fan-in multiple listen ports (e.g., `30000-32000:host:9090`)
 
 **Examples**:
 ```bash
-# Map ports 8080-8083 to backend ports 9000-9003
+# Map ports 8080-8083 to backend ports 9000-9003 (4:4 mapping)
 lb 8080-8083:backend:9000-9003
 
 # Map the same port range on both sides
@@ -60,6 +62,12 @@ lb 8080-8090:backend:8080-8090,http
 
 # Multiple port ranges for HTTPS
 lb 8443-8445:backend:9443-9445,https
+
+# Fan-in: map port range to single backend port
+lb 30000-32000:backend:9090
+
+# Fan-in with options
+lb 30000-30100:backend:8080,http,lb=least-connection
 ```
 
 #### Options:
@@ -350,12 +358,30 @@ services:
       - "8080-8090:8080-8090"  # Expose port range
     command: [
       "/bin/lb",
-      "8080-8090:backend:9000-9010,http"  # Map 11 ports
+      "8080-8090:backend:9000-9010,http"  # Map 11 ports (1:1)
     ]
 
   backend:
     scale: 3
     # Services listening on ports 9000-9010
+```
+
+#### Port Range Fan-in (Multiple Ports to Single Backend)
+```yml
+version: "3"
+services:
+  lb:
+    image: davinci1976/docker-lb:latest
+    ports:
+      - "30000-30100:30000-30100"  # Expose 101 ports
+    command: [
+      "/bin/lb",
+      "30000-30100:backend:9090,http"  # All ports → single backend port
+    ]
+
+  backend:
+    scale: 3
+    # Service listening on port 9090 only
 ```
 
 #### Algorithm Comparison with Affinity

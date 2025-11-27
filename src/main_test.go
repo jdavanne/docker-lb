@@ -1,9 +1,91 @@
 package main
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
 )
+
+// expandBackendPorts expands a single backend port to match listen port range length
+// This mirrors the logic in smain() for testing purposes
+func expandBackendPorts(listenPorts, backendPorts []string) ([]string, error) {
+	if len(listenPorts) != len(backendPorts) {
+		if len(backendPorts) == 1 {
+			singlePort := backendPorts[0]
+			expanded := make([]string, len(listenPorts))
+			for j := range expanded {
+				expanded[j] = singlePort
+			}
+			return expanded, nil
+		}
+		return nil, fmt.Errorf("port range mismatch: %d listen ports, %d backend ports", len(listenPorts), len(backendPorts))
+	}
+	return backendPorts, nil
+}
+
+func TestExpandBackendPorts(t *testing.T) {
+	tests := []struct {
+		name        string
+		listenPorts []string
+		backendPorts []string
+		expected    []string
+		expectError bool
+	}{
+		{
+			name:        "same length ranges",
+			listenPorts: []string{"8080", "8081", "8082"},
+			backendPorts: []string{"9000", "9001", "9002"},
+			expected:    []string{"9000", "9001", "9002"},
+			expectError: false,
+		},
+		{
+			name:        "single backend port expanded",
+			listenPorts: []string{"30000", "30001", "30002"},
+			backendPorts: []string{"9090"},
+			expected:    []string{"9090", "9090", "9090"},
+			expectError: false,
+		},
+		{
+			name:        "large range to single port",
+			listenPorts: []string{"30000", "30001", "30002", "30003", "30004"},
+			backendPorts: []string{"80"},
+			expected:    []string{"80", "80", "80", "80", "80"},
+			expectError: false,
+		},
+		{
+			name:        "single to single",
+			listenPorts: []string{"8080"},
+			backendPorts: []string{"9090"},
+			expected:    []string{"9090"},
+			expectError: false,
+		},
+		{
+			name:        "mismatched ranges (not single)",
+			listenPorts: []string{"8080", "8081", "8082"},
+			backendPorts: []string{"9000", "9001"},
+			expected:    nil,
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := expandBackendPorts(tt.listenPorts, tt.backendPorts)
+
+			if tt.expectError {
+				if err == nil {
+					t.Errorf("expected error but got none")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				} else if !reflect.DeepEqual(result, tt.expected) {
+					t.Errorf("expected %v, got %v", tt.expected, result)
+				}
+			}
+		})
+	}
+}
 
 func TestParsePortRange(t *testing.T) {
 	tests := []struct {

@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.7] - 2025-11-27
+
+### Added
+- **Port Range Fan-in**: Map multiple listen ports to a single backend port
+  - Syntax: `30000-32000:backend:9090` maps all ports 30000-32000 to backend port 9090
+  - Useful for scenarios where many external ports need to route to a single service
+  - Works with all options (http, https, lb algorithms, affinity, proxy protocol)
+- **New Unit Test**: `TestExpandBackendPorts` for port range expansion logic
+
+### Fixed
+- **TCP Error Logging**: Fixed incorrect error variables in `tcp.go` error logging
+  - First goroutine now logs `err1` instead of `err`
+  - Second goroutine now correctly assigns to and checks `err2`
+
 ## [0.0.6] - 2025-10-20
 
 ### Added
@@ -162,6 +176,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Makefile for build automation
 - Basic forwarding functionality
 
+[0.0.7]: https://github.com/davinci1976/docker-lb/compare/v0.0.6...v0.0.7
 [0.0.6]: https://github.com/davinci1976/docker-lb/compare/v0.0.5...v0.0.6
 [0.0.5]: https://github.com/davinci1976/docker-lb/compare/v0.0.4...v0.0.5
 [0.0.4]: https://github.com/davinci1976/docker-lb/compare/v0.0.3...v0.0.4

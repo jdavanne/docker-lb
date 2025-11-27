@@ -267,10 +267,19 @@ func smain(args []string, clientProxyProtocol, serverProxyProtocol bool, cert, k
 			os.Exit(1)
 		}
 
-		// Validate that ranges have the same length
+		// Validate port ranges: must be same length OR backend is single port
 		if len(listenPorts) != len(backendPorts) {
-			slog.Error("Port range mismatch", "arg", i, "listenPorts", len(listenPorts), "backendPorts", len(backendPorts))
-			os.Exit(1)
+			if len(backendPorts) == 1 {
+				// Expand single backend port to match listen range
+				singlePort := backendPorts[0]
+				backendPorts = make([]string, len(listenPorts))
+				for j := range backendPorts {
+					backendPorts[j] = singlePort
+				}
+			} else {
+				slog.Error("Port range mismatch", "arg", i, "listenPorts", len(listenPorts), "backendPorts", len(backendPorts), "hint", "backend must be single port or same range length")
+				os.Exit(1)
+			}
 		}
 
 		// Parse options
