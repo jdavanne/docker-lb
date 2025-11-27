@@ -83,7 +83,7 @@ func forward(local net.Conn, pool *BackendPool, port string, selector BackendSel
 		// Copy the data from the client to the remote server
 		received, err1 = io.Copy(remote, local)
 		if err1 != nil && closed.Load() == false {
-			slog.Error("Connection error", "port", port, "from", local.RemoteAddr(), "to", remote.RemoteAddr(), "addr", addr, "err", err)
+			slog.Error("Connection error", "port", port, "from", local.RemoteAddr(), "to", remote.RemoteAddr(), "addr", addr, "err", err1)
 		}
 		//slog.Info("Forwarding close", "port", port, "from", local.RemoteAddr(), "to", remote.RemoteAddr(), "received", received)
 		closed.Store(true)
@@ -94,9 +94,9 @@ func forward(local net.Conn, pool *BackendPool, port string, selector BackendSel
 		defer local.Close()
 		defer remote.Close()
 		// Copy the data from the remote server to the client
-		sent, err = io.Copy(local, remote)
+		sent, err2 = io.Copy(local, remote)
 		if err2 != nil && closed.Load() == false {
-			slog.Error("Connection error", "port", port, "from", local.RemoteAddr(), "to", remote.RemoteAddr(), "addr", addr, "err", err)
+			slog.Error("Connection error", "port", port, "from", local.RemoteAddr(), "to", remote.RemoteAddr(), "addr", addr, "err", err2)
 		}
 		//slog.Info("Forwarding close", "port", port, "from", local.RemoteAddr(), "to", remote.RemoteAddr(), "sent", sent)
 		closed.Store(true)
