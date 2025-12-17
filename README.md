@@ -446,6 +446,13 @@ For each connection/request:
 - Cookie-based session affinity using `proxy-affinity` cookie
 - IP affinity takes precedence over cookie affinity
 - Automatic failover if backend becomes unavailable
+- Per-client-connection transport management:
+  - Backend connections are reused across HTTP requests on the same client TCP connection
+  - Transport pools are automatically cleaned up when client disconnects
+  - 90-second idle timeout for backend connections within a session
+- Error handling:
+  - Returns 503 Service Unavailable when no backend is available
+  - Returns 502 Bad Gateway when backend connection fails
 
 ## Development
 
@@ -508,6 +515,17 @@ The `/metrics` endpoint provides comprehensive metrics without requiring any Pro
 - `dockerlb_pool_backends{host,port}` - Number of backends in pool
 - `dockerlb_affinity_entries{host}` - Active affinity entries
 
+**HTTP Mode Metrics** (only for HTTP/HTTPS listeners):
+- `dockerlb_http_client_connections_current{port}` - Current client TCP connections
+- `dockerlb_http_client_connections_total{port}` - Total client TCP connections accepted
+- `dockerlb_http_client_connections_rejected_total{port}` - Total client connections rejected
+- `dockerlb_http_transports_current{port}` - Current backend transport pools
+- `dockerlb_http_transports_created_total{port}` - Total transports created
+- `dockerlb_http_transports_closed_total{port}` - Total transports closed
+- `dockerlb_http_requests_total{port}` - Total HTTP requests handled
+- `dockerlb_http_requests_503_total{port}` - Requests rejected with 503 (no backend)
+- `dockerlb_http_requests_502_total{port}` - Requests rejected with 502 (backend error)
+
 **Go Runtime Metrics:**
 - `go_goroutines` - Number of goroutines
 - `go_info{version}` - Go version
@@ -544,17 +562,16 @@ This design is especially efficient for Docker Compose scaled services where mul
 
 ## Limitations
 
-- HTTP/HTTPS mode requires cookie support from clients
+- HTTP/HTTPS mode requires cookie support from clients for session affinity
 - No health checks (relies on DNS and connection failures)
-- No connection pooling or keep-alive optimization
 
 ## Possible Future Extensions
 - Active health checks with automatic backend removal
 - Multiple service targets (blue/green deployments)
-- Connection pooling and keep-alive optimization
 - Rate limiting and bandwidth controls
 - Circuit breaker patterns
 - Enhanced WebSocket support
+- Connection limits per client/port
 
 
 

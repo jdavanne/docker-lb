@@ -365,7 +365,8 @@ func smain(args []string, clientProxyProtocol, serverProxyProtocol bool, cert, k
 
 			// Setup forwarding
 			if httpMode {
-				listenerAndForwardHttp(porti, host, port, proxyConfig, false, tls.Certificate{}, pool, selector, affinity)
+				transportMgr := listenerAndForwardHttp(porti, host, port, proxyConfig, false, tls.Certificate{}, pool, selector, affinity)
+				statsServer.RegisterTransportManager(porti, transportMgr)
 			} else if httpsMode {
 				if cert == "" || key == "" {
 					// Generate self signed key pair
@@ -377,7 +378,8 @@ func smain(args []string, clientProxyProtocol, serverProxyProtocol bool, cert, k
 					slog.Error("Failed to load TLS certificate", "cert", cert, "key", key, "err", err)
 					os.Exit(1)
 				}
-				listenerAndForwardHttp(porti, host, port, proxyConfig, true, cer, pool, selector, affinity)
+				transportMgr := listenerAndForwardHttp(porti, host, port, proxyConfig, true, cer, pool, selector, affinity)
+				statsServer.RegisterTransportManager(porti, transportMgr)
 			} else {
 				// TCP mode
 				listenAndForward(porti, pool, selector, affinity, proxyConfig)

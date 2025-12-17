@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.8] - 2025-12-17
+
+### Added
+- **HTTP Per-Client-Connection Transport Management**: Backend connection reuse and proper cleanup
+  - One `http.Transport` per client TCP connection (not per request)
+  - Backend connections are reused across HTTP requests on the same client connection
+  - Automatic cleanup when client disconnects via `ConnContext`/`ConnState` hooks
+  - 90-second idle timeout for backend connections within a session
+  - Prevents connection leaks that occurred with per-request transports
+- **HTTP Request-Level Metrics**: New Prometheus metrics for HTTP/HTTPS mode
+  - `dockerlb_http_requests_total{port}`: Total HTTP requests handled
+  - `dockerlb_http_requests_503_total{port}`: Requests rejected with 503 (no backend available)
+  - `dockerlb_http_requests_502_total{port}`: Requests rejected with 502 (backend connection error)
+- **HTTP Connection-Level Metrics**: Track client TCP connections separately from requests
+  - `dockerlb_http_client_connections_current{port}`: Current client TCP connections
+  - `dockerlb_http_client_connections_total{port}`: Total client TCP connections accepted
+  - `dockerlb_http_client_connections_rejected_total{port}`: Total client connections rejected
+- **HTTP Transport Metrics**: Monitor backend connection pool lifecycle
+  - `dockerlb_http_transports_current{port}`: Current backend transport pools
+  - `dockerlb_http_transports_created_total{port}`: Total transports created
+  - `dockerlb_http_transports_closed_total{port}`: Total transports closed
+- **502 Error Handling**: Custom `ErrorHandler` on ReverseProxy to catch and track backend failures
+
+### Changed
+- **HTTP/HTTPS Mode Error Responses**: Now returns proper HTTP status codes
+  - 503 Service Unavailable when no backend is available
+  - 502 Bad Gateway when backend connection fails
+- **Stats Server Interface**: New `TransportStatsProvider` interface for HTTP metrics
+
+### Fixed
+- **HTTP Transport Leak**: Fixed issue where a new `http.Transport` was created for every request
+  - Previously, transports were never closed, causing potential connection/memory leaks
+  - Now transports are bound to client connection lifecycle
+
 ## [0.0.7] - 2025-11-27
 
 ### Added
@@ -176,6 +210,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Makefile for build automation
 - Basic forwarding functionality
 
+[0.0.8]: https://github.com/davinci1976/docker-lb/compare/v0.0.7...v0.0.8
 [0.0.7]: https://github.com/davinci1976/docker-lb/compare/v0.0.6...v0.0.7
 [0.0.6]: https://github.com/davinci1976/docker-lb/compare/v0.0.5...v0.0.6
 [0.0.5]: https://github.com/davinci1976/docker-lb/compare/v0.0.4...v0.0.5

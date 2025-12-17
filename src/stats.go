@@ -8,11 +8,17 @@ import (
 	"sync"
 )
 
+// TransportStatsProvider provides transport statistics
+type TransportStatsProvider interface {
+	Stats() TransportStats
+}
+
 type StatsServer struct {
-	backendPools map[string]*BackendPool // key: "host:port"
-	affinityMaps map[string]*AffinityMap // key: "host"
-	selectors    map[string]BackendSelector // key: "port"
-	mu           sync.RWMutex
+	backendPools      map[string]*BackendPool        // key: "host:port"
+	affinityMaps      map[string]*AffinityMap        // key: "host"
+	selectors         map[string]BackendSelector     // key: "port"
+	transportManagers map[string]TransportStatsProvider // key: "port" (HTTP/HTTPS only)
+	mu                sync.RWMutex
 }
 
 type BackendStats struct {
@@ -47,10 +53,17 @@ type PortStats struct {
 
 func NewStatsServer() *StatsServer {
 	return &StatsServer{
-		backendPools: make(map[string]*BackendPool),
-		affinityMaps: make(map[string]*AffinityMap),
-		selectors:    make(map[string]BackendSelector),
+		backendPools:      make(map[string]*BackendPool),
+		affinityMaps:      make(map[string]*AffinityMap),
+		selectors:         make(map[string]BackendSelector),
+		transportManagers: make(map[string]TransportStatsProvider),
 	}
+}
+
+func (s *StatsServer) RegisterTransportManager(port string, mgr TransportStatsProvider) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.transportManagers[port] = mgr
 }
 
 func (s *StatsServer) RegisterBackendPool(key string, pool *BackendPool) {
@@ -469,6 +482,118 @@ func (s *StatsServer) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("\"} "))
 		w.Write([]byte(formatInt(count)))
 		w.Write([]byte("\n"))
+	}
+	w.Write([]byte("\n"))
+
+	// HTTP transport metrics (per-port)
+	if len(s.transportManagers) > 0 {
+		w.Write([]byte("# HELP dockerlb_http_client_connections_current Current HTTP client TCP connections\n"))
+		w.Write([]byte("# TYPE dockerlb_http_client_connections_current gauge\n"))
+		for port, mgr := range s.transportManagers {
+			stats := mgr.Stats()
+			w.Write([]byte("dockerlb_http_client_connections_current{port=\""))
+			w.Write([]byte(port))
+			w.Write([]byte("\"} "))
+			w.Write([]byte(formatInt64(stats.CurrentConns)))
+			w.Write([]byte("\n"))
+		}
+		w.Write([]byte("\n"))
+
+		w.Write([]byte("# HELP dockerlb_http_client_connections_total Total HTTP client TCP connections accepted\n"))
+		w.Write([]byte("# TYPE dockerlb_http_client_connections_total counter\n"))
+		for port, mgr := range s.transportManagers {
+			stats := mgr.Stats()
+			w.Write([]byte("dockerlb_http_client_connections_total{port=\""))
+			w.Write([]byte(port))
+			w.Write([]byte("\"} "))
+			w.Write([]byte(formatUint64(stats.TotalConns)))
+			w.Write([]byte("\n"))
+		}
+		w.Write([]byte("\n"))
+
+		w.Write([]byte("# HELP dockerlb_http_client_connections_rejected_total Total HTTP client TCP connections rejected\n"))
+		w.Write([]byte("# TYPE dockerlb_http_client_connections_rejected_total counter\n"))
+		for port, mgr := range s.transportManagers {
+			stats := mgr.Stats()
+			w.Write([]byte("dockerlb_http_client_connections_rejected_total{port=\""))
+			w.Write([]byte(port))
+			w.Write([]byte("\"} "))
+			w.Write([]byte(formatUint64(stats.RejectedConns)))
+			w.Write([]byte("\n"))
+		}
+		w.Write([]byte("\n"))
+
+		w.Write([]byte("# HELP dockerlb_http_transports_current Current HTTP transports (backend connection pools)\n"))
+		w.Write([]byte("# TYPE dockerlb_http_transports_current gauge\n"))
+		for port, mgr := range s.transportManagers {
+			stats := mgr.Stats()
+			w.Write([]byte("dockerlb_http_transports_current{port=\""))
+			w.Write([]byte(port))
+			w.Write([]byte("\"} "))
+			w.Write([]byte(formatInt(stats.CurrentTransports)))
+			w.Write([]byte("\n"))
+		}
+		w.Write([]byte("\n"))
+
+		w.Write([]byte("# HELP dockerlb_http_transports_created_total Total HTTP transports created\n"))
+		w.Write([]byte("# TYPE dockerlb_http_transports_created_total counter\n"))
+		for port, mgr := range s.transportManagers {
+			stats := mgr.Stats()
+			w.Write([]byte("dockerlb_http_transports_created_total{port=\""))
+			w.Write([]byte(port))
+			w.Write([]byte("\"} "))
+			w.Write([]byte(formatUint64(stats.TransportsCreated)))
+			w.Write([]byte("\n"))
+		}
+		w.Write([]byte("\n"))
+
+		w.Write([]byte("# HELP dockerlb_http_transports_closed_total Total HTTP transports closed\n"))
+		w.Write([]byte("# TYPE dockerlb_http_transports_closed_total counter\n"))
+		for port, mgr := range s.transportManagers {
+			stats := mgr.Stats()
+			w.Write([]byte("dockerlb_http_transports_closed_total{port=\""))
+			w.Write([]byte(port))
+			w.Write([]byte("\"} "))
+			w.Write([]byte(formatUint64(stats.TransportsClosed)))
+			w.Write([]byte("\n"))
+		}
+		w.Write([]byte("\n"))
+
+		// Request metrics
+		w.Write([]byte("# HELP dockerlb_http_requests_total Total HTTP requests handled\n"))
+		w.Write([]byte("# TYPE dockerlb_http_requests_total counter\n"))
+		for port, mgr := range s.transportManagers {
+			stats := mgr.Stats()
+			w.Write([]byte("dockerlb_http_requests_total{port=\""))
+			w.Write([]byte(port))
+			w.Write([]byte("\"} "))
+			w.Write([]byte(formatUint64(stats.RequestsTotal)))
+			w.Write([]byte("\n"))
+		}
+		w.Write([]byte("\n"))
+
+		w.Write([]byte("# HELP dockerlb_http_requests_503_total HTTP requests rejected with 503 (no backend available)\n"))
+		w.Write([]byte("# TYPE dockerlb_http_requests_503_total counter\n"))
+		for port, mgr := range s.transportManagers {
+			stats := mgr.Stats()
+			w.Write([]byte("dockerlb_http_requests_503_total{port=\""))
+			w.Write([]byte(port))
+			w.Write([]byte("\"} "))
+			w.Write([]byte(formatUint64(stats.Requests503)))
+			w.Write([]byte("\n"))
+		}
+		w.Write([]byte("\n"))
+
+		w.Write([]byte("# HELP dockerlb_http_requests_502_total HTTP requests rejected with 502 (backend error)\n"))
+		w.Write([]byte("# TYPE dockerlb_http_requests_502_total counter\n"))
+		for port, mgr := range s.transportManagers {
+			stats := mgr.Stats()
+			w.Write([]byte("dockerlb_http_requests_502_total{port=\""))
+			w.Write([]byte(port))
+			w.Write([]byte("\"} "))
+			w.Write([]byte(formatUint64(stats.Requests502)))
+			w.Write([]byte("\n"))
+		}
 	}
 }
 
