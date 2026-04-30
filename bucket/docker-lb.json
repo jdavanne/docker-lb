@@ -1,0 +1,22 @@
+{
+    "version": "0.0.9",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/jdavanne/docker-lb/releases/download/v0.0.9/docker-lb_0.0.9_windows_amd64.zip",
+            "bin": [
+                "docker-lb.exe"
+            ],
+            "hash": "be63f12d479e5965cc1dc2f9744654e2441ecdb70331e1ffe7d593cc3fd93600"
+        },
+        "arm64": {
+            "url": "https://github.com/jdavanne/docker-lb/releases/download/v0.0.9/docker-lb_0.0.9_windows_arm64.zip",
+            "bin": [
+                "docker-lb.exe"
+            ],
+            "hash": "820b8c99056f4a85baa1dca5192b14529f18b25f91d4a817ee0aad690fad662e"
+        }
+    },
+    "homepage": "https://github.com/jdavanne/docker-lb",
+    "license": "MIT",
+    "description": "Lightweight TCP/HTTP/HTTPS load balancer for Docker Compose environments"
+}
