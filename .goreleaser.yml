@@ -1,0 +1,97 @@
+version: 2
+
+project_name: docker-lb
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - main: ./src
+    binary: docker-lb
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w
+      - -X=main.Version={{.Version}}
+      - -X=main.Build={{.ShortCommit}}
+      - -X=main.Date={{.Date}}
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        format: zip
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+
+brews:
+  - name: docker-lb
+    repository:
+      owner: jdavanne
+      name: docker-lb
+      branch: main
+      token: "{{ .Env.HOMEBREW_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/jdavanne/docker-lb"
+    description: "Lightweight TCP/HTTP/HTTPS load balancer for Docker Compose environments"
+    license: "MIT"
+    install: |
+      bin.install "docker-lb"
+    test: |
+      assert_match version.to_s, shell_output("#{bin}/docker-lb --version 2>&1", 1)
+
+scoops:
+  - repository:
+      owner: jdavanne
+      name: docker-lb
+      branch: main
+      token: "{{ .Env.HOMEBREW_TOKEN }}"
+    directory: bucket
+    homepage: "https://github.com/jdavanne/docker-lb"
+    description: "Lightweight TCP/HTTP/HTTPS load balancer for Docker Compose environments"
+    license: MIT
+
+dockers:
+  - image_templates:
+      - "davinci1976/docker-lb:{{ .Version }}-amd64"
+      - "davinci1976/docker-lb:latest-amd64"
+    use: buildx
+    dockerfile: Dockerfile.goreleaser
+    build_flag_templates:
+      - "--platform=linux/amd64"
+    goarch: amd64
+  - image_templates:
+      - "davinci1976/docker-lb:{{ .Version }}-arm64"
+      - "davinci1976/docker-lb:latest-arm64"
+    use: buildx
+    dockerfile: Dockerfile.goreleaser
+    build_flag_templates:
+      - "--platform=linux/arm64"
+    goarch: arm64
+
+docker_manifests:
+  - name_template: "davinci1976/docker-lb:{{ .Version }}"
+    image_templates:
+      - "davinci1976/docker-lb:{{ .Version }}-amd64"
+      - "davinci1976/docker-lb:{{ .Version }}-arm64"
+  - name_template: "davinci1976/docker-lb:latest"
+    image_templates:
+      - "davinci1976/docker-lb:latest-amd64"
+      - "davinci1976/docker-lb:latest-arm64"

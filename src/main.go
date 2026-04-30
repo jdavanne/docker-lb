@@ -394,6 +394,7 @@ func main() {
 	clientProxyProtocol := flag.Bool("client-proxy-protocol", false, "Enable proxy protocol on client side")
 	cert := flag.String("cert", "", "TLS certificate file")
 	key := flag.String("key", "", "TLS key file")
+	showVersion := flag.Bool("version", false, "Print version and exit")
 
 	flag.Usage = func() {
 		flagSet := flag.CommandLine
@@ -402,6 +403,12 @@ func main() {
 	}
 
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Printf("docker-lb version %s (build %s, %s)\n", Version, Build, Date)
+		os.Exit(0)
+	}
+
 	slog.Info(os.Args[0], "build", Build, "version", Version, "date", Date)
 
 	if flag.NArg() == 0 {

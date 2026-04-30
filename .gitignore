@@ -1,2 +1,5 @@
 lb
+docker-lb
+bin/
+dist/
 .vscode/

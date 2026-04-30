@@ -1,0 +1,3 @@
+FROM alpine
+COPY docker-lb /bin/lb
+CMD ["/bin/lb"]

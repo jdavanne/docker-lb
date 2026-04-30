@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "Formula/**"
+      - "bucket/**"
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
+      - name: Run tests
+        run: go test -v ./src/
+
+      - name: Build (smoke test)
+        run: CGO_ENABLED=0 go build -o ./bin/docker-lb ./src
