@@ -20,12 +20,28 @@ A lightweight TCP/HTTP/HTTPS load balancer with dynamic DNS resolution, designed
 
 ## Installation
 
+### Homebrew (macOS / Linux)
+```bash
+brew tap jdavanne/docker-lb https://github.com/jdavanne/docker-lb.git
+brew install jdavanne/docker-lb/docker-lb
+```
+
+### Scoop (Windows)
+```bash
+scoop bucket add docker-lb https://github.com/jdavanne/docker-lb
+scoop install docker-lb
+```
+
+### Download Binary
+
+Pre-built binaries for Linux, macOS, and Windows (amd64/arm64) are available on the [GitHub Releases](https://github.com/jdavanne/docker-lb/releases) page.
+
 ### Docker
 ```bash
 docker pull davinci1976/docker-lb:latest
 ```
 
-### Local Build
+### Build from Source
 ```bash
 make build
 # Binary will be at ./bin/lb
