@@ -171,7 +171,7 @@ func (m *connTransportManager) Stats() TransportStats {
 	}
 }
 
-func listenerAndForwardHttp(porti, host, port string, proxyConfig ProxyProtocolConfig, isTls bool, cer tls.Certificate, pool *BackendPool, selector BackendSelector, affinity *AffinityMap) *connTransportManager {
+func listenerAndForwardHttp(porti, host, port string, proxyConfig ProxyProtocolConfig, isTls bool, cer tls.Certificate, pool Pool, selector BackendSelector, affinity *AffinityMap) *connTransportManager {
 	// Create transport manager with 90 second idle timeout for backend connections
 	transportMgr := newConnTransportManager(90 * time.Second)
 
@@ -225,7 +225,7 @@ func listenerAndForwardHttp(porti, host, port string, proxyConfig ProxyProtocolC
 	return transportMgr
 }
 
-func handleRequestAndRedirect(host, port string, pool *BackendPool, selector BackendSelector, affinity *AffinityMap, transportMgr *connTransportManager) http.HandlerFunc {
+func handleRequestAndRedirect(host, port string, pool Pool, selector BackendSelector, affinity *AffinityMap, transportMgr *connTransportManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		addr := host + ":" + port
 		newSession := false
@@ -255,7 +255,7 @@ func handleRequestAndRedirect(host, port string, pool *BackendPool, selector Bac
 		// Priority 2: Check cookie affinity
 		if backend == nil {
 			cookie, err := r.Cookie(cookieName)
-			if err == nil && pool.checkIp(cookie.Value) {
+			if err == nil && pool.CheckIP(cookie.Value) {
 				backend = pool.GetBackend(cookie.Value)
 				slog.Info("Cookie affinity hit", "sourceIP", sourceIP, "backendIP", cookie.Value)
 			}
@@ -273,12 +273,12 @@ func handleRequestAndRedirect(host, port string, pool *BackendPool, selector Bac
 			}
 		}
 
-		targetAddr := backend.IP + ":" + port
+		targetAddr := backend.IP + ":" + backend.Port
 
-		// Set cookie for future requests
+		// Set cookie for future requests (store ip:port to identify backend uniquely)
 		cookie := &http.Cookie{
 			Name:  cookieName,
-			Value: backend.IP,
+			Value: backend.IP + ":" + backend.Port,
 			Path:  "/",
 		}
 		http.SetCookie(w, cookie)

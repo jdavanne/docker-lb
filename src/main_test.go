@@ -515,3 +515,72 @@ func TestParseProxyProtocolConfig(t *testing.T) {
 		})
 	}
 }
+
+func TestParseTargets(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected []backendTarget
+		wantErr  bool
+	}{
+		{
+			name:     "single host:port",
+			input:    "service1:9000",
+			expected: []backendTarget{{host: "service1", port: "9000"}},
+		},
+		{
+			name:     "single host:port-range",
+			input:    "service1:9000-9003",
+			expected: []backendTarget{{host: "service1", port: "9000-9003"}},
+		},
+		{
+			name:  "same host multiple ports",
+			input: "service1:9000+9001+9002",
+			expected: []backendTarget{
+				{host: "service1", port: "9000"},
+				{host: "service1", port: "9001"},
+				{host: "service1", port: "9002"},
+			},
+		},
+		{
+			name:  "multiple host:port",
+			input: "service1:9000+service2:9001",
+			expected: []backendTarget{
+				{host: "service1", port: "9000"},
+				{host: "service2", port: "9001"},
+			},
+		},
+		{
+			name:  "multiple host:port with port-only",
+			input: "service1:9000+9001+service2:8080",
+			expected: []backendTarget{
+				{host: "service1", port: "9000"},
+				{host: "service1", port: "9001"},
+				{host: "service2", port: "8080"},
+			},
+		},
+		{
+			name:    "port-only without preceding host",
+			input:   "9000",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := parseTargets(tt.input)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !reflect.DeepEqual(result, tt.expected) {
+				t.Errorf("expected %v, got %v", tt.expected, result)
+			}
+		})
+	}
+}

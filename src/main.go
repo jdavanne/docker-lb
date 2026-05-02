@@ -210,6 +210,39 @@ func parsePortRange(portStr string) ([]string, error) {
 	return ports, nil
 }
 
+// backendTarget represents a parsed host:port backend target
+type backendTarget struct {
+	host string
+	port string
+}
+
+// parseTargets parses the target portion of a mapping (after the listen port).
+// Supports:
+//   - "host:port" — single target
+//   - "host:port1+port2+port3" — same host, multiple ports
+//   - "host1:port1+host2:port2" — multiple host:port targets
+func parseTargets(targetStr string) ([]backendTarget, error) {
+	segments := strings.Split(targetStr, "+")
+	var targets []backendTarget
+
+	for _, seg := range segments {
+		parts := strings.SplitN(seg, ":", 2)
+		if len(parts) == 2 {
+			// host:port or host:port-range
+			targets = append(targets, backendTarget{host: parts[0], port: parts[1]})
+		} else if len(parts) == 1 {
+			// Just a port (or port range) — inherit host from first target
+			if len(targets) == 0 {
+				return nil, fmt.Errorf("port-only target %q must follow a host:port target", seg)
+			}
+			targets = append(targets, backendTarget{host: targets[0].host, port: parts[0]})
+		} else {
+			return nil, fmt.Errorf("invalid target segment: %q", seg)
+		}
+	}
+	return targets, nil
+}
+
 func smain(args []string, clientProxyProtocol, serverProxyProtocol bool, cert, key string) {
 	// Parse backend weights
 	backendWeights := parseBackendWeights(*backendWeightsFlag)
@@ -239,47 +272,46 @@ func smain(args []string, clientProxyProtocol, serverProxyProtocol bool, cert, k
 
 	for i, arg := range args {
 		options := strings.Split(arg, ",")
-		mappings := strings.Split(options[0], ":")
-		var portiStr, host, portStr string
-		if len(mappings) == 3 {
-			portiStr = mappings[0]
-			host = mappings[1]
-			portStr = mappings[2]
-		} else if len(mappings) == 2 {
-			portiStr = mappings[1]
-			host = mappings[0]
-			portStr = mappings[1]
-		} else {
+		mapping := options[0]
+
+		// Parse listen_port:targets format
+		// First colon-separated segment that looks like a port (or port range) is the listen port
+		// Rest is the target string (which may contain colons due to host:port pairs)
+		var portiStr, targetStr string
+		colonIdx := strings.Index(mapping, ":")
+		if colonIdx == -1 {
 			slog.Error("Invalid argument format", "arg", i, "value", arg, "expected", "porti:host:port or host:port")
 			os.Exit(1)
 		}
 
-		// Parse port ranges
+		firstPart := mapping[:colonIdx]
+		rest := mapping[colonIdx+1:]
+
+		// Determine if firstPart is a listen port (numeric or range) or a hostname
+		_, portErr := parsePortRange(firstPart)
+		// Check if rest contains another colon (meaning first part is listen port, rest is host:port)
+		if portErr == nil && strings.Contains(rest, ":") {
+			// listen_port:host:port(+...) format
+			portiStr = firstPart
+			targetStr = rest
+		} else {
+			// host:port format (listen port = backend port)
+			portiStr = rest
+			targetStr = mapping
+		}
+
+		// Parse listen port range
 		listenPorts, err := parsePortRange(portiStr)
 		if err != nil {
 			slog.Error("Error parsing listen port range", "arg", i, "err", err)
 			os.Exit(1)
 		}
 
-		backendPorts, err := parsePortRange(portStr)
+		// Parse targets (supports + for multi-target)
+		targets, err := parseTargets(targetStr)
 		if err != nil {
-			slog.Error("Error parsing backend port range", "arg", i, "err", err)
+			slog.Error("Error parsing targets", "arg", i, "err", err)
 			os.Exit(1)
-		}
-
-		// Validate port ranges: must be same length OR backend is single port
-		if len(listenPorts) != len(backendPorts) {
-			if len(backendPorts) == 1 {
-				// Expand single backend port to match listen range
-				singlePort := backendPorts[0]
-				backendPorts = make([]string, len(listenPorts))
-				for j := range backendPorts {
-					backendPorts[j] = singlePort
-				}
-			} else {
-				slog.Error("Port range mismatch", "arg", i, "listenPorts", len(listenPorts), "backendPorts", len(backendPorts), "hint", "backend must be single port or same range length")
-				os.Exit(1)
-			}
 		}
 
 		// Parse options
@@ -301,75 +333,131 @@ func smain(args []string, clientProxyProtocol, serverProxyProtocol bool, cert, k
 			os.Exit(1)
 		}
 
-		// Create DNS resolver for this host if not exists
-		if resolvers[host] == nil {
-			resolvers[host] = NewDNSResolver(host, *probePeriod)
-			go resolvers[host].start()
-			slog.Info("Starting DNS resolver", "host", host, "probePeriod", *probePeriod)
+		// Expand all targets with port ranges
+		type expandedTarget struct {
+			host string
+			port string
+		}
+		var allTargets []expandedTarget
+		for _, t := range targets {
+			ports, err := parsePortRange(t.port)
+			if err != nil {
+				slog.Error("Error parsing target port range", "arg", i, "host", t.host, "port", t.port, "err", err)
+				os.Exit(1)
+			}
+			for _, p := range ports {
+				allTargets = append(allTargets, expandedTarget{host: t.host, port: p})
+			}
 		}
 
-		// Create service for each port in the range
-		for j := range len(listenPorts) {
-			porti := listenPorts[j]
-			port := backendPorts[j]
-
-			// Create backend pool for this host:port if not exists
-			poolKey := host + ":" + port
-			if pools[poolKey] == nil {
-				pools[poolKey] = NewBackendPool(host, port)
-
-				// Subscribe pool to DNS resolver
-				resolvers[host].Subscribe(pools[poolKey])
-				slog.Info("Backend pool subscribed to DNS resolver", "host", host, "port", port)
-
-				// Apply backend weights if configured
-				if weights, ok := backendWeights[host]; ok {
-					pools[poolKey].SetWeights(weights)
+		// For single-target with port ranges, validate against listen ports
+		if len(targets) == 1 {
+			backendPorts, _ := parsePortRange(targets[0].port)
+			if len(listenPorts) != len(backendPorts) {
+				if len(backendPorts) == 1 {
+					// Expand single backend port to match listen range
+					singlePort := backendPorts[0]
+					backendPorts = make([]string, len(listenPorts))
+					for j := range backendPorts {
+						backendPorts[j] = singlePort
+					}
+				} else {
+					slog.Error("Port range mismatch", "arg", i, "listenPorts", len(listenPorts), "backendPorts", len(backendPorts), "hint", "backend must be single port or same range length")
+					os.Exit(1)
 				}
-
-				// Register with stats server
-				statsServer.RegisterBackendPool(poolKey, pools[poolKey])
 			}
-			pool := pools[poolKey]
+			// Rebuild allTargets from validated ports
+			allTargets = nil
+			for _, p := range backendPorts {
+				allTargets = append(allTargets, expandedTarget{host: targets[0].host, port: p})
+			}
+		}
 
-			// Create affinity map if enabled for this port
+		// Ensure DNS resolvers exist for all target hosts
+		for _, t := range allTargets {
+			if resolvers[t.host] == nil {
+				resolvers[t.host] = NewDNSResolver(t.host, *probePeriod)
+				go resolvers[t.host].start()
+				slog.Info("Starting DNS resolver", "host", t.host, "probePeriod", *probePeriod)
+			}
+		}
+
+		// Multi-target mode: multiple targets specified with +
+		isMultiTarget := len(targets) > 1
+
+		// For multi-target: all targets share a single listen port
+		if isMultiTarget && len(listenPorts) > 1 {
+			slog.Error("Multi-target (+) cannot be combined with listen port ranges", "arg", i)
+			os.Exit(1)
+		}
+
+		if isMultiTarget {
+			// Multi-target mode: create pools for all targets and combine into a MultiPool
+			porti := listenPorts[0]
+			var subPools []*BackendPool
+
+			for _, t := range allTargets {
+				poolKey := t.host + ":" + t.port
+				if pools[poolKey] == nil {
+					pools[poolKey] = NewBackendPool(t.host, t.port)
+					resolvers[t.host].Subscribe(pools[poolKey])
+					slog.Info("Backend pool subscribed to DNS resolver", "host", t.host, "port", t.port)
+
+					if weights, ok := backendWeights[t.host]; ok {
+						pools[poolKey].SetWeights(weights)
+					}
+					statsServer.RegisterBackendPool(poolKey, pools[poolKey])
+				}
+				subPools = append(subPools, pools[poolKey])
+			}
+
+			// Create multi-pool or use single pool
+			var pool Pool
+			if len(subPools) == 1 {
+				pool = subPools[0]
+			} else {
+				pool = NewMultiPool(subPools)
+			}
+
+			// Create affinity map if enabled
 			var affinity *AffinityMap
 			if affinityEnabled {
-				// Create affinity map per host if not exists
-				if affinityMaps[host] == nil {
+				affinityKey := porti
+				if affinityMaps[affinityKey] == nil {
 					ttl := *affinityTTL
 					if ttl == 0 {
-						ttl = 30 * time.Second // default
+						ttl = 30 * time.Second
 					}
-					affinityMaps[host] = NewAffinityMap(host, ttl)
-					slog.Info("IP affinity enabled", "host", host, "ttl", ttl)
-
-					// Register with stats server
-					statsServer.RegisterAffinityMap(host, affinityMaps[host])
+					affinityMaps[affinityKey] = NewAffinityMap(affinityKey, ttl)
+					slog.Info("IP affinity enabled", "listenPort", porti, "ttl", ttl)
+					statsServer.RegisterAffinityMap(affinityKey, affinityMaps[affinityKey])
 				}
-				affinity = affinityMaps[host]
+				affinity = affinityMaps[affinityKey]
 			}
 
-			// Determine if explicit weights are configured
-			hasExplicitWeights := backendWeights[host] != nil
+			hasExplicitWeights := false
+			for _, t := range allTargets {
+				if backendWeights[t.host] != nil {
+					hasExplicitWeights = true
+					break
+				}
+			}
 
-			// Create backend selector
 			selector, err := NewSelector(algorithm, hasExplicitWeights)
 			if err != nil {
 				slog.Error("Error creating selector", "arg", i, "algorithm", algorithm, "err", err)
 				os.Exit(1)
 			}
-
-			// Register selector with stats server
 			statsServer.RegisterSelector(porti, selector)
 
-			// Setup forwarding
+			host := allTargets[0].host
+			port := allTargets[0].port
+
 			if httpMode {
 				transportMgr := listenerAndForwardHttp(porti, host, port, proxyConfig, false, tls.Certificate{}, pool, selector, affinity)
 				statsServer.RegisterTransportManager(porti, transportMgr)
 			} else if httpsMode {
 				if cert == "" || key == "" {
-					// Generate self signed key pair
 					cert, key = generateSelfSignedCert()
 					slog.Info("Self signed certificate generated", "cert", cert, "key", key)
 				}
@@ -381,8 +469,68 @@ func smain(args []string, clientProxyProtocol, serverProxyProtocol bool, cert, k
 				transportMgr := listenerAndForwardHttp(porti, host, port, proxyConfig, true, cer, pool, selector, affinity)
 				statsServer.RegisterTransportManager(porti, transportMgr)
 			} else {
-				// TCP mode
 				listenAndForward(porti, pool, selector, affinity, proxyConfig)
+			}
+		} else {
+			// Single-target mode: original behavior with port range expansion
+			for j := range len(listenPorts) {
+				porti := listenPorts[j]
+				port := allTargets[j].port
+				host := allTargets[j].host
+
+				poolKey := host + ":" + port
+				if pools[poolKey] == nil {
+					pools[poolKey] = NewBackendPool(host, port)
+					resolvers[host].Subscribe(pools[poolKey])
+					slog.Info("Backend pool subscribed to DNS resolver", "host", host, "port", port)
+
+					if weights, ok := backendWeights[host]; ok {
+						pools[poolKey].SetWeights(weights)
+					}
+					statsServer.RegisterBackendPool(poolKey, pools[poolKey])
+				}
+				pool := pools[poolKey]
+
+				var affinity *AffinityMap
+				if affinityEnabled {
+					if affinityMaps[host] == nil {
+						ttl := *affinityTTL
+						if ttl == 0 {
+							ttl = 30 * time.Second
+						}
+						affinityMaps[host] = NewAffinityMap(host, ttl)
+						slog.Info("IP affinity enabled", "host", host, "ttl", ttl)
+						statsServer.RegisterAffinityMap(host, affinityMaps[host])
+					}
+					affinity = affinityMaps[host]
+				}
+
+				hasExplicitWeights := backendWeights[host] != nil
+				selector, err := NewSelector(algorithm, hasExplicitWeights)
+				if err != nil {
+					slog.Error("Error creating selector", "arg", i, "algorithm", algorithm, "err", err)
+					os.Exit(1)
+				}
+				statsServer.RegisterSelector(porti, selector)
+
+				if httpMode {
+					transportMgr := listenerAndForwardHttp(porti, host, port, proxyConfig, false, tls.Certificate{}, pool, selector, affinity)
+					statsServer.RegisterTransportManager(porti, transportMgr)
+				} else if httpsMode {
+					if cert == "" || key == "" {
+						cert, key = generateSelfSignedCert()
+						slog.Info("Self signed certificate generated", "cert", cert, "key", key)
+					}
+					cer, err := tls.LoadX509KeyPair(cert, key)
+					if err != nil {
+						slog.Error("Failed to load TLS certificate", "cert", cert, "key", key, "err", err)
+						os.Exit(1)
+					}
+					transportMgr := listenerAndForwardHttp(porti, host, port, proxyConfig, true, cer, pool, selector, affinity)
+					statsServer.RegisterTransportManager(porti, transportMgr)
+				} else {
+					listenAndForward(porti, pool, selector, affinity, proxyConfig)
+				}
 			}
 		}
 	}

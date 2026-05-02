@@ -12,7 +12,7 @@ var (
 
 // BackendSelector defines the interface for backend selection algorithms
 type BackendSelector interface {
-	Select(pool *BackendPool, sourceIP string, affinity *AffinityMap) (*Backend, error)
+	Select(pool Pool, sourceIP string, affinity *AffinityMap) (*Backend, error)
 	Name() string
 }
 
@@ -23,7 +23,7 @@ func (s *RandomSelector) Name() string {
 	return "random"
 }
 
-func (s *RandomSelector) Select(pool *BackendPool, sourceIP string, affinity *AffinityMap) (*Backend, error) {
+func (s *RandomSelector) Select(pool Pool, sourceIP string, affinity *AffinityMap) (*Backend, error) {
 	// Check IP affinity first if enabled
 	if affinity != nil && sourceIP != "" {
 		if backendIP, found := affinity.Get(sourceIP); found {
@@ -44,7 +44,7 @@ func (s *RandomSelector) Select(pool *BackendPool, sourceIP string, affinity *Af
 
 	// Update affinity if enabled
 	if affinity != nil && sourceIP != "" {
-		affinity.Set(sourceIP, selected.IP)
+		affinity.Set(sourceIP, selected.IP+":"+selected.Port)
 	}
 
 	return selected, nil
@@ -57,7 +57,7 @@ func (s *RoundRobinSelector) Name() string {
 	return "round-robin"
 }
 
-func (s *RoundRobinSelector) Select(pool *BackendPool, sourceIP string, affinity *AffinityMap) (*Backend, error) {
+func (s *RoundRobinSelector) Select(pool Pool, sourceIP string, affinity *AffinityMap) (*Backend, error) {
 	// Check IP affinity first if enabled
 	if affinity != nil && sourceIP != "" {
 		if backendIP, found := affinity.Get(sourceIP); found {
@@ -78,7 +78,7 @@ func (s *RoundRobinSelector) Select(pool *BackendPool, sourceIP string, affinity
 
 	// Update affinity if enabled
 	if affinity != nil && sourceIP != "" {
-		affinity.Set(sourceIP, selected.IP)
+		affinity.Set(sourceIP, selected.IP+":"+selected.Port)
 	}
 
 	return selected, nil
@@ -91,7 +91,7 @@ func (s *LeastConnectionSelector) Name() string {
 	return "least-connection"
 }
 
-func (s *LeastConnectionSelector) Select(pool *BackendPool, sourceIP string, affinity *AffinityMap) (*Backend, error) {
+func (s *LeastConnectionSelector) Select(pool Pool, sourceIP string, affinity *AffinityMap) (*Backend, error) {
 	// Check IP affinity first if enabled
 	if affinity != nil && sourceIP != "" {
 		if backendIP, found := affinity.Get(sourceIP); found {
@@ -130,7 +130,7 @@ func (s *LeastConnectionSelector) Select(pool *BackendPool, sourceIP string, aff
 
 	// Update affinity if enabled
 	if affinity != nil && sourceIP != "" {
-		affinity.Set(sourceIP, selected.IP)
+		affinity.Set(sourceIP, selected.IP+":"+selected.Port)
 	}
 
 	return selected, nil
@@ -153,7 +153,7 @@ func (s *WeightedRandomSelector) Name() string {
 	return "weighted-random"
 }
 
-func (s *WeightedRandomSelector) Select(pool *BackendPool, sourceIP string, affinity *AffinityMap) (*Backend, error) {
+func (s *WeightedRandomSelector) Select(pool Pool, sourceIP string, affinity *AffinityMap) (*Backend, error) {
 	// Check IP affinity first if enabled
 	if affinity != nil && sourceIP != "" {
 		if backendIP, found := affinity.Get(sourceIP); found {
@@ -202,7 +202,7 @@ func (s *WeightedRandomSelector) Select(pool *BackendPool, sourceIP string, affi
 		n := rand.IntN(len(backends))
 		selected := backends[n]
 		if affinity != nil && sourceIP != "" {
-			affinity.Set(sourceIP, selected.IP)
+			affinity.Set(sourceIP, selected.IP+":"+selected.Port)
 		}
 		return selected, nil
 	}
@@ -224,7 +224,7 @@ func (s *WeightedRandomSelector) Select(pool *BackendPool, sourceIP string, affi
 
 	// Update affinity if enabled
 	if affinity != nil && sourceIP != "" {
-		affinity.Set(sourceIP, selected.IP)
+		affinity.Set(sourceIP, selected.IP+":"+selected.Port)
 	}
 
 	return selected, nil

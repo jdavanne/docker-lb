@@ -39,11 +39,20 @@ func NewBackendPool(host, port string) *BackendPool {
 	}
 }
 
-// GetBackend returns a backend by IP
-func (p *BackendPool) GetBackend(ip string) *Backend {
+// GetBackend returns a backend by IP or IP:port key
+func (p *BackendPool) GetBackend(key string) *Backend {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	return p.backends[ip]
+	if b := p.backends[key]; b != nil {
+		return b
+	}
+	// Try parsing as ip:port
+	for _, b := range p.backends {
+		if b.IP+":"+b.Port == key {
+			return b
+		}
+	}
+	return nil
 }
 
 // GetBackends returns a snapshot of all backends
@@ -105,12 +114,9 @@ func (p *BackendPool) resolve() (string, error) {
 	return backend.IP, nil
 }
 
-// CheckIP checks if an IP is in the backend pool
-func (p *BackendPool) checkIp(ip string) bool {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	_, ok := p.backends[ip]
-	return ok
+// CheckIP checks if an IP or IP:port key is in the backend pool
+func (p *BackendPool) CheckIP(key string) bool {
+	return p.GetBackend(key) != nil
 }
 
 // OnDNSUpdate is called when DNS resolver updates the IP list

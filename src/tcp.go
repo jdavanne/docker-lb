@@ -12,7 +12,7 @@ import (
 	"github.com/pires/go-proxyproto"
 )
 
-func forward(local net.Conn, pool *BackendPool, port string, selector BackendSelector, affinity *AffinityMap, proxyConfig ProxyProtocolConfig) {
+func forward(local net.Conn, pool Pool, port string, selector BackendSelector, affinity *AffinityMap, proxyConfig ProxyProtocolConfig) {
 	defer local.Close()
 
 	ops.Add(1)
@@ -117,7 +117,7 @@ func forward(local net.Conn, pool *BackendPool, port string, selector BackendSel
 	)
 }
 
-func listenAndForward(port string, pool *BackendPool, selector BackendSelector, affinity *AffinityMap, proxyConfig ProxyProtocolConfig) {
+func listenAndForward(port string, pool Pool, selector BackendSelector, affinity *AffinityMap, proxyConfig ProxyProtocolConfig) {
 	l1, err := net.Listen("tcp", ":"+port)
 	if err != nil {
 		slog.Error("Failed to listen on TCP port", "port", port, "err", err)
@@ -135,7 +135,7 @@ func listenAndForward(port string, pool *BackendPool, selector BackendSelector, 
 		if proxyConfig.ServerEnabled {
 			defer l2.Close()
 		}
-		slog.Info("Forwarding", "port", port, "host", pool.host, "backendPort", pool.port, "algorithm", selector.Name(), "listenaddr", l1.Addr())
+		slog.Info("Forwarding TCP", "port", port, "algorithm", selector.Name(), "listenaddr", l1.Addr())
 		for {
 			// Wait for a connection.
 			conn, err := l2.Accept()
