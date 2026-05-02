@@ -2,8 +2,10 @@ package main
 
 import (
 	"fmt"
+	"net"
 	"reflect"
 	"testing"
+	"time"
 )
 
 // expandBackendPorts expands a single backend port to match listen port range length
@@ -582,5 +584,179 @@ func TestParseTargets(t *testing.T) {
 				t.Errorf("expected %v, got %v", tt.expected, result)
 			}
 		})
+	}
+}
+
+func TestParseBackendWeights(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected map[string]map[string]int
+	}{
+		{
+			name:     "empty",
+			input:    "",
+			expected: map[string]map[string]int{},
+		},
+		{
+			name:  "single host single ip",
+			input: "myhost:10.0.0.1=100",
+			expected: map[string]map[string]int{
+				"myhost": {"10.0.0.1": 100},
+			},
+		},
+		{
+			name:  "single host multiple ips",
+			input: "myhost:10.0.0.1=100,10.0.0.2=50",
+			expected: map[string]map[string]int{
+				"myhost": {"10.0.0.1": 100, "10.0.0.2": 50},
+			},
+		},
+		{
+			name:  "multiple hosts",
+			input: "host1:10.0.0.1=80;host2:10.0.1.1=60,10.0.1.2=40",
+			expected: map[string]map[string]int{
+				"host1": {"10.0.0.1": 80},
+				"host2": {"10.0.1.1": 60, "10.0.1.2": 40},
+			},
+		},
+		{
+			name:     "invalid entry no colon",
+			input:    "invalidentry",
+			expected: map[string]map[string]int{},
+		},
+		{
+			name:     "invalid weight",
+			input:    "host:10.0.0.1=abc",
+			expected: map[string]map[string]int{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parseBackendWeights(tt.input)
+			if !reflect.DeepEqual(result, tt.expected) {
+				t.Errorf("expected %v, got %v", tt.expected, result)
+			}
+		})
+	}
+}
+
+func TestSmain_BasicTCP(t *testing.T) {
+	// Start a backend echo server
+	backendLn, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to start backend: %v", err)
+	}
+	defer backendLn.Close()
+
+	go func() {
+		for {
+			conn, err := backendLn.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				buf := make([]byte, 1024)
+				n, _ := conn.Read(buf)
+				conn.Write(buf[:n])
+				conn.Close()
+			}()
+		}
+	}()
+
+	_, backendPort, _ := net.SplitHostPort(backendLn.Addr().String())
+
+	// Find a free listen port
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, listenPort, _ := net.SplitHostPort(ln.Addr().String())
+	ln.Close()
+
+	// Disable stats server for test
+	origStatsPort := *statsPort
+	*statsPort = ""
+	defer func() { *statsPort = origStatsPort }()
+
+	arg := listenPort + ":127.0.0.1:" + backendPort
+	smain([]string{arg}, false, false, "", "")
+
+	time.Sleep(50 * time.Millisecond)
+
+	conn, err := net.Dial("tcp", "127.0.0.1:"+listenPort)
+	if err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+	defer conn.Close()
+
+	conn.Write([]byte("smain test"))
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	buf := make([]byte, 1024)
+	n, _ := conn.Read(buf)
+	if string(buf[:n]) != "smain test" {
+		t.Errorf("expected 'smain test', got %q", string(buf[:n]))
+	}
+}
+
+func TestSmain_MultiTarget(t *testing.T) {
+	// Start two backend servers
+	backend1Ln, _ := net.Listen("tcp", "127.0.0.1:0")
+	defer backend1Ln.Close()
+	backend2Ln, _ := net.Listen("tcp", "127.0.0.1:0")
+	defer backend2Ln.Close()
+
+	for _, bln := range []net.Listener{backend1Ln, backend2Ln} {
+		bln := bln
+		go func() {
+			for {
+				conn, err := bln.Accept()
+				if err != nil {
+					return
+				}
+				go func() {
+					_, port, _ := net.SplitHostPort(bln.Addr().String())
+					conn.Write([]byte("port:" + port))
+					conn.Close()
+				}()
+			}
+		}()
+	}
+
+	_, port1, _ := net.SplitHostPort(backend1Ln.Addr().String())
+	_, port2, _ := net.SplitHostPort(backend2Ln.Addr().String())
+
+	// Find a free listen port
+	ln, _ := net.Listen("tcp", "127.0.0.1:0")
+	_, listenPort, _ := net.SplitHostPort(ln.Addr().String())
+	ln.Close()
+
+	origStatsPort := *statsPort
+	*statsPort = ""
+	defer func() { *statsPort = origStatsPort }()
+
+	// Multi-target syntax
+	arg := listenPort + ":127.0.0.1:" + port1 + "+" + port2
+	smain([]string{arg}, false, false, "", "")
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Make multiple connections and verify we hit both backends
+	seen := make(map[string]bool)
+	for i := 0; i < 20; i++ {
+		conn, err := net.Dial("tcp", "127.0.0.1:"+listenPort)
+		if err != nil {
+			continue
+		}
+		conn.SetReadDeadline(time.Now().Add(1 * time.Second))
+		buf := make([]byte, 1024)
+		n, _ := conn.Read(buf)
+		seen[string(buf[:n])] = true
+		conn.Close()
+	}
+
+	if !seen["port:"+port1] || !seen["port:"+port2] {
+		t.Errorf("expected traffic to both backends, got: %v", seen)
 	}
 }

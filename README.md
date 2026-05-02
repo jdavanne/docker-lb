@@ -11,6 +11,7 @@ A lightweight TCP/HTTP/HTTPS load balancer with dynamic DNS resolution, designed
   - **Weighted-Random**: Intelligent probabilistic selection using connection counts
 - **IP Affinity**: Source IP-based sticky sessions with configurable TTL (default: 30s)
 - **HTTP/HTTPS Cookie Affinity**: Cookie-based session persistence
+- **Multi-Target**: Load-balance across multiple host:port backends from a single listen port using `+` syntax
 - **Port Range Mapping**: Map multiple ports in a single command (e.g., `8080-8090:backend:9000-9100`)
 - **Dynamic DNS Resolution**: Automatically discovers and updates backend IPs
 - **Connection Tracking**: Per-backend metrics (active connections, total requests, bytes transferred)
@@ -59,6 +60,14 @@ lb [options] <port-mapping> [<port-mapping>...]
 - **HTTP**: `[listen_port:]hostname:backend_port,http`
 - **HTTPS**: `[listen_port:]hostname:backend_port,https`
 
+#### Multi-Target Syntax:
+A single listen port can load-balance across multiple backend targets using `+`:
+- **Same host, multiple ports**: `8080:service:9000+9001+9002`
+- **Multiple hosts**: `8080:service1:9000+service2:9001`
+- **Mixed**: `8080:service1:9000+service2:9001+service1:9002`
+
+Each target gets its own backend pool with independent DNS resolution. Traffic is distributed across all backends from all pools combined.
+
 #### Port Range Syntax:
 Ports can be specified as single values or as ranges:
 - **Single port**: `8080`
@@ -84,6 +93,21 @@ lb 30000-32000:backend:9090
 
 # Fan-in with options
 lb 30000-30100:backend:8080,http,lb=least-connection
+```
+
+**Multi-target examples**:
+```bash
+# Same service, multiple backend ports
+lb 8080:backend:9000+9001+9002
+
+# Multiple services behind one port
+lb 8080:service1:9000+service2:9001
+
+# With HTTP and load balancing options
+lb 8080:service1:9000+service2:9001,http,lb=least-connection
+
+# Multi-target with affinity
+lb 8080:api1:8080+api2:8080,http,affinity
 ```
 
 #### Options:
@@ -400,6 +424,28 @@ services:
     # Service listening on port 9090 only
 ```
 
+#### Multi-Target Load Balancing
+```yml
+version: "3"
+services:
+  lb:
+    image: davinci1976/docker-lb:latest
+    ports:
+      - "8080:8080"
+    command: [
+      "/bin/lb",
+      "8080:service1:9000+service2:9001,http,lb=least-connection"
+    ]
+
+  service1:
+    scale: 3
+    # First backend service on port 9000
+
+  service2:
+    scale: 2
+    # Second backend service on port 9001
+```
+
 #### Algorithm Comparison with Affinity
 ```yml
 version: "3"
@@ -583,7 +629,6 @@ This design is especially efficient for Docker Compose scaled services where mul
 
 ## Possible Future Extensions
 - Active health checks with automatic backend removal
-- Multiple service targets (blue/green deployments)
 - Rate limiting and bandwidth controls
 - Circuit breaker patterns
 - Enhanced WebSocket support
