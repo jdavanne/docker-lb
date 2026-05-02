@@ -5,21 +5,21 @@
 class DockerLb < Formula
   desc "Lightweight TCP/HTTP/HTTPS load balancer for Docker Compose environments"
   homepage "https://github.com/jdavanne/docker-lb"
-  version "0.0.9"
+  version "0.0.10"
   license "MIT"
 
   on_macos do
     if Hardware::CPU.intel?
-      url "https://github.com/jdavanne/docker-lb/releases/download/v0.0.9/docker-lb_0.0.9_darwin_amd64.tar.gz"
-      sha256 "e494c0ee11b4a8826ffebafb9969eff12ffe168b4cac2b678f54b941efaf1ed1"
+      url "https://github.com/jdavanne/docker-lb/releases/download/v0.0.10/docker-lb_0.0.10_darwin_amd64.tar.gz"
+      sha256 "3202fa0c2d3590649c1f2b578a19bffe0c2ad18b78b7a4cb93fedd3a03e58a9b"
 
       define_method(:install) do
         bin.install "docker-lb"
       end
     end
     if Hardware::CPU.arm?
-      url "https://github.com/jdavanne/docker-lb/releases/download/v0.0.9/docker-lb_0.0.9_darwin_arm64.tar.gz"
-      sha256 "13c2b3b06dfdb2d2c01155d0d7ff4fdc45a901ebd45ba5948c190a38451f5e88"
+      url "https://github.com/jdavanne/docker-lb/releases/download/v0.0.10/docker-lb_0.0.10_darwin_arm64.tar.gz"
+      sha256 "56af37dd65868a2224bacd9cae384b499d3b0da0c7fcf8bc1dc2009078c50e0e"
 
       define_method(:install) do
         bin.install "docker-lb"
@@ -29,15 +29,15 @@ class DockerLb < Formula
 
   on_linux do
     if Hardware::CPU.intel? && Hardware::CPU.is_64_bit?
-      url "https://github.com/jdavanne/docker-lb/releases/download/v0.0.9/docker-lb_0.0.9_linux_amd64.tar.gz"
-      sha256 "0b90d3f2dcb3c9dd3bbf6ef6b9aead035d5acc1d988215c27cbf728d8786b776"
+      url "https://github.com/jdavanne/docker-lb/releases/download/v0.0.10/docker-lb_0.0.10_linux_amd64.tar.gz"
+      sha256 "770badd4c5194de8f48f6a2b2e4a5023b5bf84adb0fcd4182abd6c0c375c989e"
       define_method(:install) do
         bin.install "docker-lb"
       end
     end
     if Hardware::CPU.arm? && Hardware::CPU.is_64_bit?
-      url "https://github.com/jdavanne/docker-lb/releases/download/v0.0.9/docker-lb_0.0.9_linux_arm64.tar.gz"
-      sha256 "bb68b80905d93ee25244e49d70f424fa9e13c8d6d4273a314e2832365c58ee46"
+      url "https://github.com/jdavanne/docker-lb/releases/download/v0.0.10/docker-lb_0.0.10_linux_arm64.tar.gz"
+      sha256 "d0a3bf616c7d23da13034a16e014f6c89f3db964b3b44191bf978daa14695f95"
       define_method(:install) do
         bin.install "docker-lb"
       end
