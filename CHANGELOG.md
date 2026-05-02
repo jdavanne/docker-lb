@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.9] - 2026-05-02
+
+### Added
+- **Multi-Target Support**: Load-balance across multiple host:port backends from a single listen port
+  - Syntax: `8080:service1:9000+service2:9001` routes to backends on both services
+  - Same host shorthand: `8080:backend:9000+9001+9002` targets multiple ports on one host
+  - Each target gets its own backend pool with independent DNS resolution
+  - Works with all modes (TCP, HTTP, HTTPS) and all options (affinity, algorithms, proxy protocol)
+- **Cross-Platform Distribution**: CLI binaries for Linux, macOS, and Windows
+  - Homebrew tap: `brew install jdavanne/docker-lb/docker-lb`
+  - Scoop bucket: `scoop install docker-lb`
+  - Pre-built binaries on GitHub Releases (amd64/arm64)
+- **GitHub Actions CI/CD**: Automated testing and release pipeline
+  - CI workflow: runs tests on push/PR to main
+  - Release workflow: GoReleaser on version tags, publishes binaries, Docker images, Homebrew formula, and Scoop manifest
+- **Comprehensive Unit Tests**: 80%+ code coverage without Docker
+  - TCP forwarding tests with local listeners
+  - HTTP handler tests with httptest
+  - DNS resolver unit tests
+  - Stats server endpoint tests
+  - Pool interface and multi-target parsing tests
+- **Improved CLI Help**: `--help` now shows `--` for long options, per-mapping options reference, and 10 usage examples
+- **`--version` Flag**: Print version and exit
+
+### Changed
+- **Pool Interface**: `BackendPool` and new `MultiPool` implement a common `Pool` interface
+  - Selectors, TCP forwarder, and HTTP handler work with either pool type
+  - `MultiPool` aggregates multiple `BackendPool` instances for multi-target
+- **Cookie/Affinity Keying**: Now stores `ip:port` instead of just `ip` for unambiguous backend identification across multi-target pools
+
 ## [0.0.8] - 2025-12-17
 
 ### Added
@@ -210,11 +240,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Makefile for build automation
 - Basic forwarding functionality
 
-[0.0.8]: https://github.com/davinci1976/docker-lb/compare/v0.0.7...v0.0.8
-[0.0.7]: https://github.com/davinci1976/docker-lb/compare/v0.0.6...v0.0.7
-[0.0.6]: https://github.com/davinci1976/docker-lb/compare/v0.0.5...v0.0.6
-[0.0.5]: https://github.com/davinci1976/docker-lb/compare/v0.0.4...v0.0.5
-[0.0.4]: https://github.com/davinci1976/docker-lb/compare/v0.0.3...v0.0.4
-[0.0.3]: https://github.com/davinci1976/docker-lb/compare/v0.0.2...v0.0.3
-[0.0.2]: https://github.com/davinci1976/docker-lb/compare/v0.0.1...v0.0.2
-[0.0.1]: https://github.com/davinci1976/docker-lb/releases/tag/v0.0.1
+[0.0.9]: https://github.com/jdavanne/docker-lb/compare/v0.0.8...v0.0.9
+[0.0.8]: https://github.com/jdavanne/docker-lb/compare/v0.0.7...v0.0.8
+[0.0.7]: https://github.com/jdavanne/docker-lb/compare/v0.0.6...v0.0.7
+[0.0.6]: https://github.com/jdavanne/docker-lb/compare/v0.0.5...v0.0.6
+[0.0.5]: https://github.com/jdavanne/docker-lb/compare/v0.0.4...v0.0.5
+[0.0.4]: https://github.com/jdavanne/docker-lb/compare/v0.0.3...v0.0.4
+[0.0.3]: https://github.com/jdavanne/docker-lb/compare/v0.0.2...v0.0.3
+[0.0.2]: https://github.com/jdavanne/docker-lb/compare/v0.0.1...v0.0.2
+[0.0.1]: https://github.com/jdavanne/docker-lb/releases/tag/v0.0.1
