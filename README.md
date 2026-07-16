@@ -614,6 +614,31 @@ is selectable with `--log-format`:
 
 All formats write to stderr.
 
+### Trace Context (`trace_id` / `span_id`)
+
+Every forwarded connection and HTTP request is tagged with a
+[W3C Trace Context](https://www.w3.org/TR/trace-context/). The `trace_id` and
+`span_id` (and `parent_span_id` when a trace is adopted) appear on the
+`Forwarding start` / `Forwarding close` log lines, so a single request can be
+correlated end-to-end across the load balancer.
+
+- **HTTP/HTTPS**: an inbound `traceparent` request header is adopted when valid
+  (its span becomes `parent_span_id` and a fresh span is minted); otherwise a
+  fresh trace is minted. The `traceparent` is propagated to the backend as an
+  HTTP header.
+- **TCP**: a fresh trace is minted per connection. When server-side proxy
+  protocol is enabled, an upstream trace carried in a PROXY **v2** trace TLV is
+  adopted instead.
+- **Backend propagation over PROXY protocol**: when `proxy-client=v2` is set,
+  the trace context is written to the backend as a PROXY v2 TLV
+  (`PP2_TYPE_TRACE_CONTEXT = 0xE1`). PROXY **v1** has no TLV facility, so the
+  trace roots at the backend. See
+  [RFC-01 — Carrying W3C Trace Context over the PROXY Protocol](https://www.w3.org/TR/trace-context/)
+  for the wire format.
+
+Trace logging is always on. Backend propagation reuses the existing opt-in proxy
+protocol / HTTP paths — no additional flag is required.
+
 ### Verbose Logging
 
 When running with `--verbose`, the load balancer provides:

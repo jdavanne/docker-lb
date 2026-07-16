@@ -34,6 +34,18 @@ func forward(local net.Conn, pool Pool, port string, selector BackendSelector, a
 
 	addr := backend.IP + ":" + backend.Port
 
+	// Establish the connection trace context: adopt an upstream trace from the
+	// PROXY v2 trace TLV when server-side proxy protocol is enabled and the
+	// header carries a valid one, otherwise mint a fresh trace for this hop.
+	trace := MintTrace()
+	if proxyConfig.ServerEnabled {
+		if ppConn, ok := local.(*proxyproto.Conn); ok {
+			if tc, ok := traceFromHeader(ppConn.ProxyHeader()); ok {
+				trace = tc
+			}
+		}
+	}
+
 	// Track connection
 	pool.OnConnect(backend)
 	defer pool.OnDisconnect(backend)
@@ -44,12 +56,12 @@ func forward(local net.Conn, pool Pool, port string, selector BackendSelector, a
 	// Connect to the remote server
 	remote, err := net.Dial("tcp", addr)
 	if err != nil {
-		slog.Error("Dial failed", "port", port, "from", local.RemoteAddr(), "addr", addr, "backend", backend.IP, "err", err)
+		slog.Error("Dial failed", append([]any{"port", port, "from", local.RemoteAddr(), "addr", addr, "backend", backend.IP, "err", err}, trace.logArgs()...)...)
 		return
 	}
 	defer remote.Close()
 
-	slog.Info("Forwarding start", "port", port, "from", local.RemoteAddr(), "to", remote.RemoteAddr(), "backend", backend.IP, "algorithm", selector.Name(), "count", ops.Load(), "opened", opened.Load())
+	slog.Info("Forwarding start", append([]any{"port", port, "from", local.RemoteAddr(), "to", remote.RemoteAddr(), "backend", backend.IP, "algorithm", selector.Name(), "count", ops.Load(), "opened", opened.Load()}, trace.logArgs()...)...)
 
 	if proxyConfig.ClientEnabled {
 		// Create a proxyprotocol header with configurable version
@@ -59,6 +71,13 @@ func forward(local net.Conn, pool Pool, port string, selector BackendSelector, a
 			TransportProtocol: proxyproto.TCPv4,
 			SourceAddr:        local.RemoteAddr(),
 			DestinationAddr:   local.LocalAddr(),
+		}
+		// Carry the trace context to the backend via a v2 TLV. v1 is plain text
+		// and has no TLV facility, so the trace roots at the backend instead.
+		if proxyConfig.ClientVersion == 2 {
+			if err := header.SetTLVs([]proxyproto.TLV{traceTLV(trace)}); err != nil {
+				slog.Error("Proxy protocol trace TLV encode failed", "port", port, "err", err)
+			}
 		}
 		// After the connection was created write the proxy headers first
 		_, err = header.WriteTo(remote)
@@ -110,10 +129,11 @@ func forward(local net.Conn, pool Pool, port string, selector BackendSelector, a
 	// Track bytes for backend
 	pool.AddBytes(backend, sent+received)
 
-	slog.Info("Forwarding close", "port", port, "from", local.RemoteAddr(), "to", remote.RemoteAddr(),
+	slog.Info("Forwarding close", append([]any{"port", port, "from", local.RemoteAddr(), "to", remote.RemoteAddr(),
 		"addr", addr, "backend", backend.IP, "sent", sent, "received", received, "duration", duration,
-		"count", ops.Load(), "opened", opened.Load()-1,
-		"cumSent", cumSent.Load(), "cumReceived", cumReceived.Load(),
+		"count", ops.Load(), "opened", opened.Load() - 1,
+		"cumSent", cumSent.Load(), "cumReceived", cumReceived.Load()},
+		trace.logArgs()...)...,
 	)
 }
 

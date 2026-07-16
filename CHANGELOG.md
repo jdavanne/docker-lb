@@ -12,6 +12,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `logfmt` is now the default (`time=... level=INFO msg=... key=value`)
   - `json` emits one structured JSON object per line
   - `text` keeps the previous classic log line format
+- **W3C Trace Context Propagation**: every forwarded connection/request carries a
+  `trace_id`/`span_id`, logged on the `Forwarding start`/`close` (and backend error) lines
+  - HTTP/HTTPS: adopts an inbound `traceparent` header when valid (recording `parent_span_id`),
+    otherwise mints a fresh trace; propagates `traceparent` to the backend
+  - TCP: mints a fresh trace per connection; adopts an upstream trace from a PROXY v2 trace TLV
+    when server-side proxy protocol is enabled
+  - Emits the trace context to the backend as a PROXY v2 TLV (`PP2_TYPE_TRACE_CONTEXT = 0xE1`,
+    subtype `0x1`/`0x2`) when `proxy-client=v2` is configured; v1 has no TLV facility so the
+    trace roots at the backend (per RFC-01 trace-context-propagation)
 
 ### Changed
 - `--verbose` now also lowers the log level to DEBUG, surfacing per-connection transport lifecycle logs

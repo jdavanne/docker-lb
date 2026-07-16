@@ -230,6 +230,13 @@ func handleRequestAndRedirect(host, port string, pool Pool, selector BackendSele
 		addr := host + ":" + port
 		newSession := false
 
+		// Establish the request trace context: adopt an inbound W3C traceparent
+		// header when present and valid, otherwise mint a fresh trace.
+		trace := MintTrace()
+		if tc, ok := AdoptTraceparent(r.Header.Get("traceparent")); ok {
+			trace = tc
+		}
+
 		// Track every request
 		transportMgr.RecordRequest()
 
@@ -302,7 +309,7 @@ func handleRequestAndRedirect(host, port string, pool Pool, selector BackendSele
 			defer affinity.Touch(sourceIP)
 		}
 
-		slog.Info("Forwarding start", "port", port, "from", r.RemoteAddr, "to", targetAddr, "backend", backend.IP, "algorithm", selector.Name(), "newSession", newSession, "count", ops.Load(), "opened", opened.Load())
+		slog.Info("Forwarding start", append([]any{"port", port, "from", r.RemoteAddr, "to", targetAddr, "backend", backend.IP, "algorithm", selector.Name(), "newSession", newSession, "count", ops.Load(), "opened", opened.Load()}, trace.logArgs()...)...)
 
 		// Get the transport for this client connection
 		// This allows backend connection reuse while the client connection is open,
@@ -323,9 +330,11 @@ func handleRequestAndRedirect(host, port string, pool Pool, selector BackendSele
 			Rewrite: func(r *httputil.ProxyRequest) {
 				r.SetURL(proxyURL)
 				r.Out.Host = r.In.Host // if desired
+				// Propagate the trace context to the backend as a W3C header.
+				r.Out.Header.Set("traceparent", trace.Traceparent())
 			},
 			ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-				slog.Error("Backend error", "target", targetAddr, "err", err)
+				slog.Error("Backend error", append([]any{"target", targetAddr, "err", err}, trace.logArgs()...)...)
 				transportMgr.Record502()
 				http.Error(w, "Bad Gateway", http.StatusBadGateway)
 			},
@@ -333,9 +342,10 @@ func handleRequestAndRedirect(host, port string, pool Pool, selector BackendSele
 		proxy.Transport = transport
 		proxy.ServeHTTP(w, r)
 
-		slog.Info("Forwarding close", "port", port, "from", r.RemoteAddr, "to", targetAddr,
+		slog.Info("Forwarding close", append([]any{"port", port, "from", r.RemoteAddr, "to", targetAddr,
 			"addr", addr, "backend", backend.IP,
-			"count", ops.Load(), "opened", opened.Load()-1,
+			"count", ops.Load(), "opened", opened.Load() - 1},
+			trace.logArgs()...)...,
 		)
 	}
 }
