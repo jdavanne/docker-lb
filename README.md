@@ -111,7 +111,8 @@ lb 8080:api1:8080+api2:8080,http,affinity
 ```
 
 #### Options:
-- `--verbose`: Enable detailed logging
+- `--verbose`: Enable detailed logging (lowers log level to DEBUG)
+- `--log-format <format>`: Log output format: `logfmt`, `json`, `text` (default: `logfmt`)
 - `--lb-algorithm <algo>`: Global load balancing algorithm: `random`, `round-robin`, `least-connection`, `weighted-random` (default: `random`)
 - `--affinity-ttl <duration>`: IP affinity TTL in seconds (default: 30s, 0 to disable)
 - `--backend-weights <config>`: Explicit backend weights for weighted-random (format: `host:ip1=weight1,ip2=weight2;...`)
@@ -602,9 +603,21 @@ scrape_configs:
       - targets: ['localhost:8080']
 ```
 
+### Log Format
+
+Logs are structured key/value records emitted via `log/slog`. The output format
+is selectable with `--log-format`:
+
+- `logfmt` (default): `time=... level=INFO msg=... key=value ...`
+- `json`: one JSON object per line (`{"time":...,"level":"INFO","msg":...}`)
+- `text`: Go's classic log line (`2026/07/16 12:00:00 INFO msg key=value`)
+
+All formats write to stderr.
+
 ### Verbose Logging
 
 When running with `--verbose`, the load balancer provides:
+- DEBUG-level log records (e.g. per-connection transport lifecycle)
 - Connection open/close events with source/destination
 - Data transfer statistics per connection
 - DNS resolution updates

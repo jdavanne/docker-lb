@@ -43,6 +43,38 @@ var ops atomic.Uint64
 var opened atomic.Int64
 var cumSent, cumReceived atomic.Int64
 
+// setupLogger installs the default slog logger for the requested output format.
+// Supported formats:
+//   - "logfmt" (default): key=value pairs, e.g. time=... level=INFO msg=... key=value
+//   - "json":             structured JSON, one object per line
+//   - "text":             Go's classic log line, e.g. 2026/07/16 12:00:00 INFO msg key=value
+//
+// When verbose is set the level is lowered to DEBUG for all formats.
+func setupLogger(format string, verbose bool) error {
+	level := slog.LevelInfo
+	if verbose {
+		level = slog.LevelDebug
+	}
+	opts := &slog.HandlerOptions{Level: level}
+
+	var handler slog.Handler
+	switch format {
+	case "logfmt":
+		handler = slog.NewTextHandler(os.Stderr, opts)
+	case "json":
+		handler = slog.NewJSONHandler(os.Stderr, opts)
+	case "text":
+		// Classic default handler routed through the standard log package.
+		slog.SetLogLoggerLevel(level)
+		return nil
+	default:
+		return fmt.Errorf("invalid --log-format %q: expected logfmt, json, or text", format)
+	}
+
+	slog.SetDefault(slog.New(handler))
+	return nil
+}
+
 func PrintMemUsage() {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
@@ -542,6 +574,7 @@ func main() {
 	clientProxyProtocol := flag.Bool("client-proxy-protocol", false, "Enable proxy protocol on client side")
 	cert := flag.String("cert", "", "TLS certificate file")
 	key := flag.String("key", "", "TLS key file")
+	logFormat := flag.String("log-format", "logfmt", "Log output format: logfmt, json, text")
 	showVersion := flag.Bool("version", false, "Print version and exit")
 
 	flag.Usage = func() {
@@ -597,6 +630,12 @@ func main() {
 	if *showVersion {
 		fmt.Printf("docker-lb version %s (build %s, %s)\n", Version, Build, Date)
 		os.Exit(0)
+	}
+
+	if err := setupLogger(*logFormat, *verbose); err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		flag.Usage()
+		os.Exit(1)
 	}
 
 	slog.Info(os.Args[0], "build", Build, "version", Version, "date", Date)

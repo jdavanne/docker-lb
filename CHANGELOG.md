@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Configurable Log Format**: `--log-format` selects `logfmt` (default), `json`, or `text` output
+  - `logfmt` is now the default (`time=... level=INFO msg=... key=value`)
+  - `json` emits one structured JSON object per line
+  - `text` keeps the previous classic log line format
+
+### Changed
+- `--verbose` now also lowers the log level to DEBUG, surfacing per-connection transport lifecycle logs
+
 ## [0.0.10] - 2026-05-02
 
 ### Added
