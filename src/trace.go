@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"math/big"
 	"regexp"
 
 	"github.com/pires/go-proxyproto"
@@ -84,12 +85,39 @@ func (tc TraceContext) Traceparent() string {
 	return fmt.Sprintf("00-%s-%s-%02x", tc.TraceIDHex(), tc.SpanIDHex(), tc.Flags)
 }
 
+// traceEncode renders raw trace/span id bytes for log display. It defaults to
+// hex and is switched to base62 via --trace-encoding. Wire formats (the
+// traceparent string and the PROXY TLV) always use hex regardless of this
+// setting.
+var traceEncode = hex.EncodeToString
+
+// encodeBase62 renders id bytes as a base62 string by interpreting them as a
+// big-endian integer. This is shorter than hex (a 16-byte trace-id is <= 22
+// chars vs 32; an 8-byte span-id <= 11 vs 16) and is display-only.
+func encodeBase62(b []byte) string {
+	return new(big.Int).SetBytes(b).Text(62)
+}
+
+// setTraceEncoding selects the log display encoding for trace/span ids.
+func setTraceEncoding(mode string) error {
+	switch mode {
+	case "hex":
+		traceEncode = hex.EncodeToString
+	case "base62":
+		traceEncode = encodeBase62
+	default:
+		return fmt.Errorf("invalid --trace-encoding %q: expected hex or base62", mode)
+	}
+	return nil
+}
+
 // logArgs returns slog key/value pairs for the trace context, including
-// parent_span_id only when this hop adopted an upstream trace.
+// parent_span_id only when this hop adopted an upstream trace. Ids are rendered
+// with the configured display encoding (see traceEncode).
 func (tc TraceContext) logArgs() []any {
-	args := []any{"trace_id", tc.TraceIDHex(), "span_id", tc.SpanIDHex()}
-	if p := tc.ParentSpanIDHex(); p != "" {
-		args = append(args, "parent_span_id", p)
+	args := []any{"trace_id", traceEncode(tc.TraceID[:]), "span_id", traceEncode(tc.SpanID[:])}
+	if tc.ParentSpanID != ([8]byte{}) {
+		args = append(args, "parent_span_id", traceEncode(tc.ParentSpanID[:]))
 	}
 	return args
 }

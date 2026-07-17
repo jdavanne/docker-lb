@@ -575,6 +575,7 @@ func main() {
 	cert := flag.String("cert", "", "TLS certificate file")
 	key := flag.String("key", "", "TLS key file")
 	logFormat := flag.String("log-format", "logfmt", "Log output format: logfmt, json, text")
+	traceEncoding := flag.String("trace-encoding", "hex", "Trace/span id encoding in logs: hex, base62")
 	showVersion := flag.Bool("version", false, "Print version and exit")
 
 	flag.Usage = func() {
@@ -633,6 +634,12 @@ func main() {
 	}
 
 	if err := setupLogger(*logFormat, *verbose); err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		flag.Usage()
+		os.Exit(1)
+	}
+
+	if err := setTraceEncoding(*traceEncoding); err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		flag.Usage()
 		os.Exit(1)

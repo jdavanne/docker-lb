@@ -113,6 +113,7 @@ lb 8080:api1:8080+api2:8080,http,affinity
 #### Options:
 - `--verbose`: Enable detailed logging (lowers log level to DEBUG)
 - `--log-format <format>`: Log output format: `logfmt`, `json`, `text` (default: `logfmt`)
+- `--trace-encoding <enc>`: Trace/span id encoding in logs: `hex`, `base62` (default: `hex`)
 - `--lb-algorithm <algo>`: Global load balancing algorithm: `random`, `round-robin`, `least-connection`, `weighted-random` (default: `random`)
 - `--affinity-ttl <duration>`: IP affinity TTL in seconds (default: 30s, 0 to disable)
 - `--backend-weights <config>`: Explicit backend weights for weighted-random (format: `host:ip1=weight1,ip2=weight2;...`)
@@ -638,6 +639,11 @@ correlated end-to-end across the load balancer.
 
 Trace logging is always on. Backend propagation reuses the existing opt-in proxy
 protocol / HTTP paths — no additional flag is required.
+
+By default ids are logged as hex. `--trace-encoding base62` renders them as
+shorter base62 strings in the logs (a trace-id becomes ≤ 22 chars instead of 32,
+a span-id ≤ 11 instead of 16). This is **display-only**: the `traceparent` sent
+to the backend and the PROXY TLV always use standard W3C hex.
 
 ### Verbose Logging
 

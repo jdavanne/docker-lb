@@ -36,6 +36,43 @@ func TestMintTrace(t *testing.T) {
 	}
 }
 
+func TestTraceEncoding(t *testing.T) {
+	tc, ok := AdoptTraceparent("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
+	if !ok {
+		t.Fatal("setup: valid traceparent rejected")
+	}
+
+	// Default is hex.
+	if err := setTraceEncoding("hex"); err != nil {
+		t.Fatalf("setTraceEncoding(hex): %v", err)
+	}
+	defer setTraceEncoding("hex") // restore global for other tests
+	hexArgs := tc.logArgs()
+	if hexArgs[1] != "4bf92f3577b34da6a3ce929d0e0e4736" {
+		t.Errorf("hex trace_id = %v, want the 32-hex value", hexArgs[1])
+	}
+
+	// base62 is shorter and deterministic; wire format stays hex.
+	if err := setTraceEncoding("base62"); err != nil {
+		t.Fatalf("setTraceEncoding(base62): %v", err)
+	}
+	b62Args := tc.logArgs()
+	b62 := b62Args[1].(string)
+	if len(b62) >= len("4bf92f3577b34da6a3ce929d0e0e4736") {
+		t.Errorf("base62 trace_id %q not shorter than hex", b62)
+	}
+	if b62 != tc.logArgs()[1].(string) {
+		t.Error("base62 encoding is not deterministic")
+	}
+	if !traceparentRe.MatchString(tc.Traceparent()) {
+		t.Error("wire traceparent must remain hex regardless of display encoding")
+	}
+
+	if err := setTraceEncoding("nope"); err == nil {
+		t.Error("expected error for invalid encoding")
+	}
+}
+
 func TestAdoptTraceparent(t *testing.T) {
 	valid := "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
 	tc, ok := AdoptTraceparent(valid)

@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Emits the trace context to the backend as a PROXY v2 TLV (`PP2_TYPE_TRACE_CONTEXT = 0xE1`,
     subtype `0x1`/`0x2`) when `proxy-client=v2` is configured; v1 has no TLV facility so the
     trace roots at the backend (per RFC-01 trace-context-propagation)
+  - `--trace-encoding base62` renders trace/span ids as shorter base62 strings in logs
+    (display-only; the `traceparent` and PROXY TLV always use standard W3C hex)
 
 ### Changed
 - `--verbose` now also lowers the log level to DEBUG, surfacing per-connection transport lifecycle logs
