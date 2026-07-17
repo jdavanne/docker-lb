@@ -17,6 +17,7 @@ services:
       - "10132:10132"
       - "10133:10133"
       - "10134:10134"
+      - "10140:10140"
     command:
       [
         "/bin/lb",
@@ -31,6 +32,7 @@ services:
         "10132:service1:8081,lb=round-robin",
         "10133:service2:8081,lb=least-connection",
         "10134:service3:9000,lb=weighted-random",
+        "10140:service4:8081,proxy-client=v2",
       ]
 
   service1:
@@ -51,6 +53,12 @@ services:
     scale: 3
     command: ["/backend", "-service", "service3", "-ports", "9000,9001,9002"]
 
+  # Proxy-protocol-aware backend: decodes the PROXY v2 trace TLV emitted by the LB.
+  service4:
+    build:
+      context: ./tests/backend
+    command: ["/backend", "-service", "service4", "-ports", "8081", "-proxy"]
+
   sut:
     build:
       context: ./tests/sut
@@ -59,3 +67,4 @@ services:
       - service1
       - service2
       - service3
+      - service4

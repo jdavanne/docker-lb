@@ -159,4 +159,50 @@ curl -f -s http://lb:8080/backends | jq '.[] | {host, port, backend_count: .coun
 echo ""
 
 echo ""
+echo "=== Testing W3C trace context ==="
+
+TRACEPARENT_RE='^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$'
+
+echo ""
+echo "--- HTTP: mint a fresh trace when no inbound traceparent (port 10124) ---"
+resp=$(curl -f -s http://lb:10124)
+echo "$resp" | jq -c '{service, traceparent}'
+tp=$(echo "$resp" | jq -r '.traceparent')
+if ! echo "$tp" | grep -Eq "$TRACEPARENT_RE"; then
+    echo "FAIL: backend did not receive a valid minted traceparent (got: '$tp')"
+    exit 1
+fi
+echo "OK: backend received minted traceparent $tp"
+
+echo ""
+echo "--- HTTP: adopt inbound traceparent and propagate to backend (port 10124) ---"
+known_tid="4bf92f3577b34da6a3ce929d0e0e4736"
+known_span="00f067aa0ba902b7"
+resp=$(curl -f -s -H "traceparent: 00-${known_tid}-${known_span}-01" http://lb:10124)
+echo "$resp" | jq -c '{service, traceparent}'
+got_tp=$(echo "$resp" | jq -r '.traceparent')
+got_tid=$(echo "$got_tp" | cut -d- -f2)
+got_span=$(echo "$got_tp" | cut -d- -f3)
+if [ "$got_tid" != "$known_tid" ]; then
+    echo "FAIL: trace-id not preserved through LB (want $known_tid, got $got_tid)"
+    exit 1
+fi
+if [ "$got_span" == "$known_span" ]; then
+    echo "FAIL: span-id was not freshly minted (still the inbound parent span $known_span)"
+    exit 1
+fi
+echo "OK: trace-id preserved ($got_tid), fresh span minted ($got_span)"
+
+echo ""
+echo "--- TCP: emit trace context to backend via PROXY v2 TLV (port 10140, proxy-client=v2) ---"
+resp=$(curl -f -s http://lb:10140)
+echo "$resp" | jq -c '{service, proxy_traceparent}'
+pp_tp=$(echo "$resp" | jq -r '.proxy_traceparent')
+if ! echo "$pp_tp" | grep -Eq "$TRACEPARENT_RE"; then
+    echo "FAIL: backend did not decode a valid trace TLV from the PROXY v2 header (got: '$pp_tp')"
+    exit 1
+fi
+echo "OK: backend decoded PROXY v2 0xE1 trace TLV: $pp_tp"
+
+echo ""
 echo "All tests passed!"
