@@ -52,16 +52,18 @@ func TestTraceEncoding(t *testing.T) {
 		t.Errorf("hex trace_id = %v, want the 32-hex value", hexArgs[1])
 	}
 
-	// base62 is shorter and deterministic; wire format stays hex.
+	// base62 is shorter, fixed-width, and deterministic; wire format stays hex.
 	if err := setTraceEncoding("base62"); err != nil {
 		t.Fatalf("setTraceEncoding(base62): %v", err)
 	}
 	b62Args := tc.logArgs()
-	b62 := b62Args[1].(string)
-	if len(b62) >= len("4bf92f3577b34da6a3ce929d0e0e4736") {
-		t.Errorf("base62 trace_id %q not shorter than hex", b62)
+	if got := len(b62Args[1].(string)); got != 22 {
+		t.Errorf("base62 trace_id width = %d, want 22", got)
 	}
-	if b62 != tc.logArgs()[1].(string) {
+	if got := len(b62Args[3].(string)); got != 11 {
+		t.Errorf("base62 span_id width = %d, want 11", got)
+	}
+	if b62Args[1] != tc.logArgs()[1] {
 		t.Error("base62 encoding is not deterministic")
 	}
 	if !traceparentRe.MatchString(tc.Traceparent()) {
@@ -70,6 +72,24 @@ func TestTraceEncoding(t *testing.T) {
 
 	if err := setTraceEncoding("nope"); err == nil {
 		t.Error("expected error for invalid encoding")
+	}
+}
+
+func TestEncodeBase62FixedWidth(t *testing.T) {
+	// Leading-zero bytes must still yield the full fixed width.
+	cases := []struct {
+		b     []byte
+		width int
+	}{
+		{make([]byte, 16), 22},                 // all-zero trace-id -> "0"*22
+		{append([]byte{0x00}, make([]byte, 7)...), 11}, // 8-byte span, leading zero
+		{[]byte{0x00, 0x00, 0x00, 0x01}, 6},     // small value keeps width for 4 bytes
+	}
+	for _, c := range cases {
+		got := encodeBase62(c.b)
+		if len(got) != c.width {
+			t.Errorf("encodeBase62(%x) width = %d (%q), want %d", c.b, len(got), got, c.width)
+		}
 	}
 }
 

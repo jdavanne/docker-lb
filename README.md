@@ -641,9 +641,9 @@ Trace logging is always on. Backend propagation reuses the existing opt-in proxy
 protocol / HTTP paths — no additional flag is required.
 
 By default ids are logged as hex. `--trace-encoding base62` renders them as
-shorter base62 strings in the logs (a trace-id becomes ≤ 22 chars instead of 32,
-a span-id ≤ 11 instead of 16). This is **display-only**: the `traceparent` sent
-to the backend and the PROXY TLV always use standard W3C hex.
+shorter, fixed-width base62 strings in the logs (a trace-id is 22 chars instead
+of 32, a span-id 11 instead of 16). This is **display-only**: the `traceparent`
+sent to the backend and the PROXY TLV always use standard W3C hex.
 
 ### Verbose Logging
 

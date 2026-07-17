@@ -5,8 +5,10 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"math"
 	"math/big"
 	"regexp"
+	"strings"
 
 	"github.com/pires/go-proxyproto"
 )
@@ -91,11 +93,21 @@ func (tc TraceContext) Traceparent() string {
 // setting.
 var traceEncode = hex.EncodeToString
 
-// encodeBase62 renders id bytes as a base62 string by interpreting them as a
-// big-endian integer. This is shorter than hex (a 16-byte trace-id is <= 22
-// chars vs 32; an 8-byte span-id <= 11 vs 16) and is display-only.
+// base62Log2 is log2(62), the bits encoded per base62 digit.
+const base62Log2 = 5.954196310386875
+
+// encodeBase62 renders id bytes as a fixed-width base62 string by interpreting
+// them as a big-endian integer and left-padding with '0' to the width that
+// covers the full byte length (22 chars for a 16-byte trace-id, 11 for an
+// 8-byte span-id). Fixed width keeps ids aligned in logs and collision-free
+// within each id type, and stays shorter than hex (32/16). Display-only.
 func encodeBase62(b []byte) string {
-	return new(big.Int).SetBytes(b).Text(62)
+	width := int(math.Ceil(float64(len(b)*8) / base62Log2))
+	s := new(big.Int).SetBytes(b).Text(62)
+	if len(s) < width {
+		s = strings.Repeat("0", width-len(s)) + s
+	}
+	return s
 }
 
 // setTraceEncoding selects the log display encoding for trace/span ids.
