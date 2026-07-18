@@ -18,6 +18,7 @@ services:
       - "10133:10133"
       - "10134:10134"
       - "10140:10140"
+      - "10150:10150"
     command:
       [
         "/bin/lb",
@@ -33,6 +34,7 @@ services:
         "10133:service2:8081,lb=least-connection",
         "10134:service3:9000,lb=weighted-random",
         "10140:service4:8081,proxy-client=v2",
+        "10150:service4:8081,proxy-server=v2,proxy-client=v2",
       ]
 
   service1:
@@ -59,6 +61,16 @@ services:
       context: ./tests/backend
     command: ["/backend", "-service", "service4", "-ports", "8081", "-proxy"]
 
+  # Sends a PROXY v2 header with a known trace TLV to the LB (proxy-server=v2),
+  # exercising the LB's adopt-over-the-wire receive path.
+  sender:
+    build:
+      context: ./tests/sender
+    command: ["/sender", "-target", "lb:10150", "-addr", ":8080"]
+    depends_on:
+      - lb
+      - service4
+
   sut:
     build:
       context: ./tests/sut
@@ -68,3 +80,4 @@ services:
       - service2
       - service3
       - service4
+      - sender

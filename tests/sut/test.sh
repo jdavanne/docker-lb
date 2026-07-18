@@ -205,4 +205,26 @@ fi
 echo "OK: backend decoded PROXY v2 0xE1 trace TLV: $pp_tp"
 
 echo ""
+echo "--- TCP: adopt inbound trace TLV over the wire (proxy-server=v2 -> proxy-client=v2) ---"
+# The sender injects a PROXY v2 header with a known trace TLV into lb:10150,
+# which must adopt the trace-id (proxy-server=v2) and re-emit it to service4
+# (proxy-client=v2). service4 echoes the trace-id it received.
+adopt_tid="11111111111111111111111111111111"
+adopt_span="2222222222222222"
+resp=$(curl -f -s http://sender:8080/)
+echo "$resp" | jq -c '{service, proxy_traceparent}'
+adopt_tp=$(echo "$resp" | jq -r '.proxy_traceparent')
+got_tid=$(echo "$adopt_tp" | cut -d- -f2)
+got_span=$(echo "$adopt_tp" | cut -d- -f3)
+if [ "$got_tid" != "$adopt_tid" ]; then
+    echo "FAIL: LB did not adopt inbound TLV trace-id (want $adopt_tid, got $got_tid)"
+    exit 1
+fi
+if [ "$got_span" == "$adopt_span" ]; then
+    echo "FAIL: span-id was not freshly minted (still the inbound span $adopt_span)"
+    exit 1
+fi
+echo "OK: LB adopted inbound TLV trace-id ($got_tid), fresh span minted ($got_span)"
+
+echo ""
 echo "All tests passed!"
