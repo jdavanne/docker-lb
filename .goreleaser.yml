@@ -47,7 +47,7 @@ brews:
       owner: jdavanne
       name: docker-lb
       branch: main
-      token: "{{ .Env.HOMEBREW_TOKEN }}"
+      token: "{{ .Env.GITHUB_TOKEN }}"
     directory: Formula
     homepage: "https://github.com/jdavanne/docker-lb"
     description: "Lightweight TCP/HTTP/HTTPS load balancer for Docker Compose environments"
@@ -62,7 +62,7 @@ scoops:
       owner: jdavanne
       name: docker-lb
       branch: main
-      token: "{{ .Env.HOMEBREW_TOKEN }}"
+      token: "{{ .Env.GITHUB_TOKEN }}"
     directory: bucket
     homepage: "https://github.com/jdavanne/docker-lb"
     description: "Lightweight TCP/HTTP/HTTPS load balancer for Docker Compose environments"

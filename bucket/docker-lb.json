@@ -1,19 +1,19 @@
 {
-    "version": "0.0.10",
+    "version": "0.0.11",
     "architecture": {
         "64bit": {
-            "url": "https://github.com/jdavanne/docker-lb/releases/download/v0.0.10/docker-lb_0.0.10_windows_amd64.zip",
+            "url": "https://github.com/jdavanne/docker-lb/releases/download/v0.0.11/docker-lb_0.0.11_windows_amd64.zip",
             "bin": [
                 "docker-lb.exe"
             ],
-            "hash": "7ee0062ba12d92acae825c532d62b21314ad857bee4f2beb1da7899f6d6c029e"
+            "hash": "78d893321677a79d494547e3f07f6d81a384a8dbc9ff71e105749ccf98edf063"
         },
         "arm64": {
-            "url": "https://github.com/jdavanne/docker-lb/releases/download/v0.0.10/docker-lb_0.0.10_windows_arm64.zip",
+            "url": "https://github.com/jdavanne/docker-lb/releases/download/v0.0.11/docker-lb_0.0.11_windows_arm64.zip",
             "bin": [
                 "docker-lb.exe"
             ],
-            "hash": "7a39d9187b002325131ae48f32d27d7006a86fa1d9fa236cc1ddfc6ed1791af4"
+            "hash": "a763104ce0a1391cc9af4e0dee9f40b1b0c124e21bbdae3c10a7ba8e20436b5f"
         }
     },
     "homepage": "https://github.com/jdavanne/docker-lb",
