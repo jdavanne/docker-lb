@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"math/big"
 	"net"
 	"strings"
 	"testing"
@@ -94,6 +96,46 @@ func TestEncodeBase62Alphabet(t *testing.T) {
 	// 62 rolls over to the two-digit "10".
 	if got := encodeBase62([]byte{62}); got[len(got)-2:] != "10" {
 		t.Errorf("encodeBase62([62]) = %q, want it to end with \"10\"", got)
+	}
+}
+
+// decodeBase62 reverses encodeBase62 using the same ASCII-ordered alphabet.
+func decodeBase62(s string) *big.Int {
+	n := new(big.Int)
+	base := big.NewInt(62)
+	for i := 0; i < len(s); i++ {
+		idx := strings.IndexByte(base62Alphabet, s[i])
+		n.Mul(n, base)
+		n.Add(n, big.NewInt(int64(idx)))
+	}
+	return n
+}
+
+// TestEncodeBase62RoundTrip proves the fixed width is wide enough to represent
+// the largest value for each id size (no most-significant digits are dropped)
+// and that leading positions are zero-padded.
+func TestEncodeBase62RoundTrip(t *testing.T) {
+	sizes := map[int]int{16: 22, 8: 11} // bytes -> expected base62 width
+	for size, wantWidth := range sizes {
+		ids := [][]byte{
+			bytes.Repeat([]byte{0x00}, size), // all-zero -> all '0'
+			bytes.Repeat([]byte{0xff}, size), // max value -> must not truncate
+			append([]byte{0x00}, bytes.Repeat([]byte{0xab}, size-1)...), // leading zero byte
+		}
+		for _, id := range ids {
+			enc := encodeBase62(id)
+			if len(enc) != wantWidth {
+				t.Errorf("size %d: width = %d (%q), want %d", size, len(enc), enc, wantWidth)
+			}
+			want := new(big.Int).SetBytes(id)
+			if got := decodeBase62(enc); got.Cmp(want) != 0 {
+				t.Errorf("size %d: round-trip mismatch for % x: got %s want %s (enc %q)", size, id, got, want, enc)
+			}
+		}
+	}
+	// The all-zero id must be entirely '0' padding.
+	if z := encodeBase62(bytes.Repeat([]byte{0x00}, 16)); z != strings.Repeat("0", 22) {
+		t.Errorf("all-zero trace-id = %q, want 22 zeros", z)
 	}
 }
 
