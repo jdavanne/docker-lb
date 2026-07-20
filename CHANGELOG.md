@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **base62 trace/span id alphabet**: `--trace-encoding base62` now uses ASCII digit
+  order (`0-9A-Za-z`) instead of Go's `big.Int` order (`0-9a-zA-Z`), so the encoding
+  is monotonic with the underlying byte order (display-only; wire stays hex)
+
 ## [0.0.11] - 2026-07-18
 
 ### Added

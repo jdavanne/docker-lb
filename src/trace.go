@@ -8,7 +8,6 @@ import (
 	"math"
 	"math/big"
 	"regexp"
-	"strings"
 
 	"github.com/pires/go-proxyproto"
 )
@@ -96,18 +95,29 @@ var traceEncode = hex.EncodeToString
 // base62Log2 is log2(62), the bits encoded per base62 digit.
 const base62Log2 = 5.954196310386875
 
+// base62Alphabet is the digit set in ASCII order (0-9, A-Z, a-z). This differs
+// from math/big's Text(62), which orders lowercase before uppercase
+// (0-9, a-z, A-Z); using the ASCII order keeps the encoding monotonic with the
+// underlying byte order.
+const base62Alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+
 // encodeBase62 renders id bytes as a fixed-width base62 string by interpreting
-// them as a big-endian integer and left-padding with '0' to the width that
-// covers the full byte length (22 chars for a 16-byte trace-id, 11 for an
-// 8-byte span-id). Fixed width keeps ids aligned in logs and collision-free
-// within each id type, and stays shorter than hex (32/16). Display-only.
+// them as a big-endian integer, using the ASCII-ordered alphabet above and
+// zero-padding to the width that covers the full byte length (22 chars for a
+// 16-byte trace-id, 11 for an 8-byte span-id). Fixed width keeps ids aligned in
+// logs and collision-free within each id type, and stays shorter than hex
+// (32/16). Display-only.
 func encodeBase62(b []byte) string {
 	width := int(math.Ceil(float64(len(b)*8) / base62Log2))
-	s := new(big.Int).SetBytes(b).Text(62)
-	if len(s) < width {
-		s = strings.Repeat("0", width-len(s)) + s
+	n := new(big.Int).SetBytes(b)
+	base := big.NewInt(62)
+	mod := new(big.Int)
+	buf := make([]byte, width)
+	for i := width - 1; i >= 0; i-- {
+		n.DivMod(n, base, mod)
+		buf[i] = base62Alphabet[mod.Int64()]
 	}
-	return s
+	return string(buf)
 }
 
 // setTraceEncoding selects the log display encoding for trace/span ids.

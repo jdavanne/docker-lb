@@ -75,6 +75,28 @@ func TestTraceEncoding(t *testing.T) {
 	}
 }
 
+func TestEncodeBase62Alphabet(t *testing.T) {
+	// Digits must follow ASCII order: 0-9, then A-Z, then a-z.
+	cases := map[byte]byte{
+		0:  '0',
+		9:  '9',
+		10: 'A',
+		35: 'Z',
+		36: 'a',
+		61: 'z',
+	}
+	for v, want := range cases {
+		got := encodeBase62([]byte{v})
+		if last := got[len(got)-1]; last != want {
+			t.Errorf("encodeBase62([%d]) last digit = %q, want %q (full %q)", v, last, want, got)
+		}
+	}
+	// 62 rolls over to the two-digit "10".
+	if got := encodeBase62([]byte{62}); got[len(got)-2:] != "10" {
+		t.Errorf("encodeBase62([62]) = %q, want it to end with \"10\"", got)
+	}
+}
+
 func TestEncodeBase62FixedWidth(t *testing.T) {
 	// Leading-zero bytes must still yield the full fixed width.
 	cases := []struct {
